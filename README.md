@@ -113,6 +113,9 @@ notch manually stays quiet.
 Under **Settings → Tasks**, active task display can be disabled without stopping
 the observer. Keeping the in-memory snapshot hot makes re-enabling immediate.
 The same `⌃⇧R` shortcut is shown beside the active-task control in the notch.
+The independent **Do Not Disturb** switch keeps completed tasks and available
+updates in the notch without opening it automatically. Manual shortcuts and the
+selected completion sound continue to work; macOS Focus is not read or changed.
 
 Choose **Check for Updates** at the bottom of Settings to ask Sparkle for the
 latest signed release immediately.

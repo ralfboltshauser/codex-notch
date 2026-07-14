@@ -1,0 +1,4 @@
+interface:
+  display_name: "Release Codex Notch"
+  short_description: "Safely prepare and publish Codex Notch releases"
+  default_prompt: "Use $release-codex-notch to prepare, verify, and publish the next Codex Notch release."

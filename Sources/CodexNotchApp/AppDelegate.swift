@@ -9,7 +9,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let activePreferences = ActiveTaskPreferences.shared
     private let appServerObserver = AppServerObserver()
     private let pairings = PairingStore()
-    private let overlay = OverlayController()
+    private let overlay = OverlayController(
+        automaticOpenAllowed: { !DoNotDisturbPreferences.shared.isEnabled }
+    )
     private let notificationSounds = NotificationSoundPlayer()
     private let updater = UpdateCoordinator()
     private let usageMonitor = CodexUsageMonitor()

@@ -1068,6 +1068,7 @@ final class OverlayController {
     private let panel: FocuslessPanel
     private let shouldReduceMotion: () -> Bool
     private let shortcutModifierState: () -> Bool
+    private let automaticOpenAllowed: () -> Bool
     private var tasks: [CompletedTask] = []
     private var activeTasks: [ActiveTask] = []
     private var showsActiveTasks = ActiveTaskPreferences.shared.isVisible
@@ -1146,6 +1147,7 @@ final class OverlayController {
     }
 
     init(
+        automaticOpenAllowed: @escaping () -> Bool = { true },
         shouldReduceMotion: @escaping () -> Bool = {
             NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         },
@@ -1154,6 +1156,7 @@ final class OverlayController {
             return flags.contains(.maskControl) && flags.contains(.maskShift)
         }
     ) {
+        self.automaticOpenAllowed = automaticOpenAllowed
         self.shouldReduceMotion = shouldReduceMotion
         self.shortcutModifierState = shortcutModifierState
         panel = FocuslessPanel(
@@ -1296,7 +1299,7 @@ final class OverlayController {
     }
 
     func showForEvent() {
-        guard hasContent else { return }
+        guard automaticOpenAllowed(), hasContent else { return }
         if phase == .hidden { targetScreen = screenUnderPointer() }
         if phase == .open || phase == .opening {
             if !isPinned { scheduleHide(after: Self.eventVisibilityDuration) }

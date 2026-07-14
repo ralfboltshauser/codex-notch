@@ -329,6 +329,17 @@ final class CodexNotchTests: XCTestCase {
         XCTAssertFalse(ActiveTaskPreferences(defaults: defaults).isVisible)
     }
 
+    func testDoNotDisturbPreferenceDefaultsOffAndPersists() throws {
+        let suite = "CodexNotchTests.DoNotDisturb.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let preferences = DoNotDisturbPreferences(defaults: defaults)
+        XCTAssertFalse(preferences.isEnabled)
+        XCTAssertTrue(preferences.toggle())
+        XCTAssertTrue(DoNotDisturbPreferences(defaults: defaults).isEnabled)
+    }
+
     func testAppServerSocketDiscoveryIncludesStableAndRemoteControlSockets() throws {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -651,6 +662,36 @@ final class CodexNotchTests: XCTestCase {
         modifiersHeld = false
         overlay.refreshShortcutModifierStateForTesting()
         XCTAssertEqual(overlay.taskBadgeTextsForTesting, ["1", "2"])
+        overlay.hide(immediately: true)
+    }
+
+    func testDoNotDisturbSuppressesAutomaticPresentationButKeepsManualToggle() {
+        _ = NSApplication.shared
+        var automaticOpenAllowed = false
+        let overlay = OverlayController(
+            automaticOpenAllowed: { automaticOpenAllowed },
+            shouldReduceMotion: { true }
+        )
+        overlay.update(tasks: [CompletedTask(
+            eventID: String(repeating: "d", count: 64),
+            title: "Quietly completed task",
+            url: URL(string: "codex://threads/\(threadID)")!,
+            receivedAt: Date()
+        )])
+
+        overlay.showForEvent()
+        XCTAssertFalse(overlay.isVisibleForTesting)
+
+        overlay.setUpdateAvailable(version: "0.4.0")
+        XCTAssertFalse(overlay.isVisibleForTesting)
+
+        overlay.toggle()
+        XCTAssertTrue(overlay.isVisibleForTesting)
+        overlay.hide(immediately: true)
+
+        automaticOpenAllowed = true
+        overlay.showForEvent()
+        XCTAssertTrue(overlay.isVisibleForTesting)
         overlay.hide(immediately: true)
     }
 
@@ -1047,6 +1088,32 @@ final class CodexNotchTests: XCTestCase {
         XCTAssertTrue(NotificationSound.allCases.filter { $0 != .none }.allSatisfy {
             $0.resourceURL != nil
         })
+    }
+
+    func testSettingsDoNotDisturbTogglePersistsWithoutMacOSFocus() throws {
+        _ = NSApplication.shared
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let suite = "CodexNotchTests.SettingsDoNotDisturb.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = DoNotDisturbPreferences(defaults: defaults)
+        let pairings = PairingStore(fileURL: directory.appendingPathComponent("pairings.json"))
+        let pairer = RemoteHostPairer(store: pairings) { _ in }
+        let controller = OnboardingWindowController(
+            pairings: pairings,
+            pairer: pairer,
+            doNotDisturbPreferences: preferences,
+            isHookInstalled: { true }
+        )
+
+        controller.showTasksForTesting()
+        let disabledButton = try XCTUnwrap(controller.doNotDisturbButtonForTesting)
+        XCTAssertEqual(disabledButton.title, "Off")
+        disabledButton.performClick(nil)
+
+        XCTAssertTrue(preferences.isEnabled)
+        XCTAssertEqual(controller.doNotDisturbButtonForTesting?.title, "On")
     }
 
     func testThemePreviewIsTemporaryAndSelectionPersists() {

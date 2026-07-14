@@ -182,6 +182,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
     private let pairings: PairingStore
     private let pairer: RemoteHostPairer
     private let notificationSounds: NotificationSoundPlayer
+    private let doNotDisturbPreferences: DoNotDisturbPreferences
     private let isHookInstalled: () -> Bool
     private let shouldReduceMotion: () -> Bool
     private let root = ThemeBackdropView()
@@ -193,6 +194,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
     private weak var remoteSummaryLabel: NSTextField?
     private weak var remoteRefreshButton: ClosureButton?
     private weak var checkForUpdatesButton: ClosureButton?
+    private weak var doNotDisturbButton: ClosureButton?
     private var working = false
     private var contentTransitionID = 0
     private var selectedPage: SettingsPage = .appearance
@@ -206,6 +208,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
     var onUninstall: ((@escaping (Result<Void, Error>) -> Void) -> Void)?
 
     var checkForUpdatesButtonForTesting: NSButton? { checkForUpdatesButton }
+    var doNotDisturbButtonForTesting: NSButton? { doNotDisturbButton }
     var settingsTabTitlesForTesting: [String] { settingsTabs.map(\.title) }
     var renderedThemeChoiceCountForTesting: Int { themeCards.count }
     var renderedSoundChoiceCountForTesting: Int { soundCards.count }
@@ -214,10 +217,15 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         buildSettingsPage(.sounds)
     }
 
+    func showTasksForTesting() {
+        buildSettingsPage(.tasks)
+    }
+
     init(
         pairings: PairingStore,
         pairer: RemoteHostPairer,
         notificationSounds: NotificationSoundPlayer = NotificationSoundPlayer(),
+        doNotDisturbPreferences: DoNotDisturbPreferences = .shared,
         isHookInstalled: @escaping () -> Bool = { CodexHookInstaller().isInstalled },
         shouldReduceMotion: @escaping () -> Bool = {
             NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
@@ -226,6 +234,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         self.pairings = pairings
         self.pairer = pairer
         self.notificationSounds = notificationSounds
+        self.doNotDisturbPreferences = doNotDisturbPreferences
         self.isHookInstalled = isHookInstalled
         self.shouldReduceMotion = shouldReduceMotion
         let window = SettingsWindow(
@@ -325,15 +334,73 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
     private func buildTasks() {
         resetContent()
         let theme = ThemeStore.shared.activeTheme
-        let preferences = ActiveTaskPreferences.shared
+        let activeTaskPreferences = ActiveTaskPreferences.shared
         let header = settingsHeader(selected: .tasks)
-        let title = makeLabel("Tasks in motion", size: 25, weight: .semibold, color: theme.primaryText)
+        let title = makeLabel("Task behavior", size: 25, weight: .semibold, color: theme.primaryText)
         let subtitle = makeLabel(
-            "See work while Codex is running, waiting for approval, or waiting for you.",
+            "Choose what the notch shows and when it appears.",
             size: 13,
             weight: .regular,
             color: theme.secondaryText
         )
+
+        func preferenceRow(
+            symbol: String,
+            accessibilityDescription: String,
+            title: String,
+            detail: String,
+            enabled: Bool,
+            toolTip: String,
+            action: @escaping () -> Void
+        ) -> (NSView, ClosureButton) {
+            let row = NSView()
+            row.translatesAutoresizingMaskIntoConstraints = false
+            let icon = NSImageView(image: NSImage(
+                systemSymbolName: symbol,
+                accessibilityDescription: accessibilityDescription
+            ) ?? NSImage())
+            icon.contentTintColor = theme.accent
+            icon.translatesAutoresizingMaskIntoConstraints = false
+            let label = makeLabel(title, size: 14, weight: .semibold, color: theme.primaryText)
+            let detailLabel = makeLabel(
+                detail,
+                size: 11.5,
+                weight: .regular,
+                color: theme.secondaryText
+            )
+            detailLabel.maximumNumberOfLines = 2
+            let toggle = ClosureButton(handler: action)
+            toggle.title = enabled ? "On" : "Off"
+            toggle.image = NSImage(
+                systemSymbolName: enabled ? "checkmark.circle.fill" : "circle",
+                accessibilityDescription: "\(title) \(enabled ? "on" : "off")"
+            )
+            toggle.imagePosition = .imageLeading
+            toggle.font = .systemFont(ofSize: 12, weight: .semibold)
+            toggle.contentTintColor = enabled ? theme.accent : theme.secondaryText
+            toggle.toolTip = toolTip
+            toggle.translatesAutoresizingMaskIntoConstraints = false
+            [icon, label, detailLabel, toggle].forEach(row.addSubview)
+            NSLayoutConstraint.activate([
+                row.heightAnchor.constraint(equalToConstant: 88),
+                icon.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 18),
+                icon.topAnchor.constraint(equalTo: row.topAnchor, constant: 17),
+                icon.widthAnchor.constraint(equalToConstant: 22),
+                icon.heightAnchor.constraint(equalToConstant: 22),
+                label.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 12),
+                label.topAnchor.constraint(equalTo: row.topAnchor, constant: 16),
+                toggle.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -18),
+                toggle.centerYAnchor.constraint(equalTo: label.centerYAnchor),
+                toggle.widthAnchor.constraint(equalToConstant: 68),
+                toggle.heightAnchor.constraint(equalToConstant: 30),
+                label.trailingAnchor.constraint(lessThanOrEqualTo: toggle.leadingAnchor, constant: -12),
+                detailLabel.leadingAnchor.constraint(equalTo: label.leadingAnchor),
+                detailLabel.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -18),
+                detailLabel.topAnchor.constraint(equalTo: label.bottomAnchor, constant: 7),
+            ])
+            return (row, toggle)
+        }
+
         let card = NSView()
         card.translatesAutoresizingMaskIntoConstraints = false
         card.wantsLayer = true
@@ -342,51 +409,48 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         card.layer?.borderWidth = 1
         card.layer?.cornerRadius = 14
         card.layer?.cornerCurve = .continuous
-        let icon = NSImageView(image: NSImage(
-            systemSymbolName: "bolt.horizontal.circle.fill",
-            accessibilityDescription: "Active tasks"
-        ) ?? NSImage())
-        icon.contentTintColor = theme.accent
-        icon.translatesAutoresizingMaskIntoConstraints = false
-        let label = makeLabel("Show active tasks", size: 14, weight: .semibold, color: theme.primaryText)
-        let detail = makeLabel(
-            "Live state is kept in memory only. Prompts, output, paths, and transcripts are never sent to the notch.",
-            size: 11.5,
-            weight: .regular,
-            color: theme.secondaryText
-        )
-        detail.maximumNumberOfLines = 2
-        let toggle = ClosureButton { [weak self] in
+        let activeTaskRow = preferenceRow(
+            symbol: "bolt.horizontal.circle.fill",
+            accessibilityDescription: "Active tasks",
+            title: "Show active tasks",
+            detail: "Live state is kept in memory only. Prompts, output, paths, and transcripts are never sent to the notch.",
+            enabled: activeTaskPreferences.isVisible,
+            toolTip: "Toggle active tasks"
+        ) { [weak self] in
             _ = ActiveTaskPreferences.shared.toggle()
             self?.buildTasks()
         }
-        toggle.title = preferences.isVisible ? "On" : "Off"
-        toggle.image = NSImage(
-            systemSymbolName: preferences.isVisible ? "checkmark.circle.fill" : "circle",
-            accessibilityDescription: preferences.isVisible ? "Active tasks shown" : "Active tasks hidden"
-        )
-        toggle.imagePosition = .imageLeading
-        toggle.font = .systemFont(ofSize: 12, weight: .semibold)
-        toggle.contentTintColor = preferences.isVisible ? theme.accent : theme.secondaryText
-        toggle.toolTip = "Toggle active tasks"
-        toggle.translatesAutoresizingMaskIntoConstraints = false
-        [icon, label, detail, toggle].forEach(card.addSubview)
+        let doNotDisturbRow = preferenceRow(
+            symbol: "moon.fill",
+            accessibilityDescription: "Do Not Disturb",
+            title: "Do Not Disturb",
+            detail: "Stops automatic openings for finished tasks and updates. Manual shortcuts and sounds still work; macOS Focus is not used.",
+            enabled: doNotDisturbPreferences.isEnabled,
+            toolTip: "Toggle Do Not Disturb"
+        ) { [weak self] in
+            guard let self else { return }
+            _ = self.doNotDisturbPreferences.toggle()
+            self.buildTasks()
+        }
+        doNotDisturbButton = doNotDisturbRow.1
+        let divider = NSView()
+        divider.translatesAutoresizingMaskIntoConstraints = false
+        divider.wantsLayer = true
+        divider.layer?.backgroundColor = theme.border.cgColor
+        [activeTaskRow.0, divider, doNotDisturbRow.0].forEach(card.addSubview)
         NSLayoutConstraint.activate([
-            card.heightAnchor.constraint(equalToConstant: 104),
-            icon.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 18),
-            icon.topAnchor.constraint(equalTo: card.topAnchor, constant: 19),
-            icon.widthAnchor.constraint(equalToConstant: 22),
-            icon.heightAnchor.constraint(equalToConstant: 22),
-            label.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 12),
-            label.topAnchor.constraint(equalTo: card.topAnchor, constant: 18),
-            toggle.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -18),
-            toggle.centerYAnchor.constraint(equalTo: label.centerYAnchor),
-            toggle.widthAnchor.constraint(equalToConstant: 68),
-            toggle.heightAnchor.constraint(equalToConstant: 30),
-            label.trailingAnchor.constraint(lessThanOrEqualTo: toggle.leadingAnchor, constant: -12),
-            detail.leadingAnchor.constraint(equalTo: label.leadingAnchor),
-            detail.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -18),
-            detail.topAnchor.constraint(equalTo: label.bottomAnchor, constant: 8),
+            card.heightAnchor.constraint(equalToConstant: 177),
+            activeTaskRow.0.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            activeTaskRow.0.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            activeTaskRow.0.topAnchor.constraint(equalTo: card.topAnchor),
+            divider.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 18),
+            divider.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -18),
+            divider.topAnchor.constraint(equalTo: activeTaskRow.0.bottomAnchor),
+            divider.heightAnchor.constraint(equalToConstant: 1),
+            doNotDisturbRow.0.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            doNotDisturbRow.0.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            doNotDisturbRow.0.topAnchor.constraint(equalTo: divider.bottomAnchor),
+            doNotDisturbRow.0.bottomAnchor.constraint(equalTo: card.bottomAnchor),
         ])
 
         let shortcutTitle = makeLabel("QUICK TOGGLE", size: 10, weight: .bold, color: theme.tertiaryText)
@@ -408,7 +472,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
             keys.centerYAnchor.constraint(equalTo: shortcutCard.centerYAnchor),
         ])
         let note = makeLabel(
-            "Active tasks never open the notch by themselves. Finished tasks keep their existing sound and auto-open behavior.",
+            "Finished tasks are still collected in Do Not Disturb and remain available with \(GlobalHotKeys.toggleShortcutLabel()).",
             size: 11.5,
             weight: .regular,
             color: theme.secondaryText
