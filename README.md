@@ -84,6 +84,11 @@ The existing number-key shortcuts remain available.
 While the notch is open, <kbd>Command</kbd>+<kbd>,</kbd> opens Settings. The
 shortcut is released back to the foreground app as soon as the notch closes.
 
+Under **Settings → Sounds**, choose from six short completion tones or select
+**No Sound**. A choice previews immediately and is remembered across launches.
+Sounds play only for newly accepted local or remote Stop-hook events; opening the
+notch manually stays quiet.
+
 To remove Codex Notch, open **Connections** and choose **Uninstall Codex Notch…**.
 The app first removes and verifies its hooks, retry services, configuration, and
 queued events on every paired Ubuntu host. It then removes the local hook and

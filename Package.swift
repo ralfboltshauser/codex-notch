@@ -20,6 +20,9 @@ let package = Package(
                 "CodexNotchCore",
                 .product(name: "Sparkle", package: "Sparkle"),
             ],
+            resources: [
+                .copy("Resources/Sounds"),
+            ],
             linkerSettings: [
                 .linkedFramework("Network"),
                 .linkedFramework("Security"),

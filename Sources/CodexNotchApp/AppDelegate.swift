@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let store = TaskStore()
     private let pairings = PairingStore()
     private let overlay = OverlayController()
+    private let notificationSounds = NotificationSoundPlayer()
     private let updater = UpdateCoordinator()
     private let usageMonitor = CodexUsageMonitor()
     private var inbox: CompletionInbox?
@@ -121,6 +122,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let inserted = try store.add(task)
             if inserted {
                 usageMonitor.refresh()
+                notificationSounds.playSelected()
                 overlay.showForEvent()
             }
             return inserted ? .accepted : .duplicate
@@ -178,7 +180,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onboarding.present()
             return
         }
-        onboarding = OnboardingWindowController(pairings: pairings, pairer: pairer)
+        onboarding = OnboardingWindowController(
+            pairings: pairings,
+            pairer: pairer,
+            notificationSounds: notificationSounds
+        )
         onboarding?.onConnectionsChanged = { [weak self] in
             _ = try? self?.startRemoteListener()
             self?.scheduleRemoteCatchUp()

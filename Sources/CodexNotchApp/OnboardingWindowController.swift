@@ -18,6 +18,11 @@ final class SettingsWindow: NSWindow {
 final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate, NSWindowDelegate {
     static let completionKey = "onboardingComplete.v2"
 
+    private enum SettingsPage {
+        case sounds
+        case connections
+    }
+
     static func versionDescription(
         info: [String: Any] = Bundle.main.infoDictionary ?? [:]
     ) -> String {
@@ -35,6 +40,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
 
     private let pairings: PairingStore
     private let pairer: RemoteHostPairer
+    private let notificationSounds: NotificationSoundPlayer
     private let shouldReduceMotion: () -> Bool
     private let root = NSVisualEffectView()
     private let content = NSView()
@@ -42,6 +48,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
     private let statusLabel = NSTextField(labelWithString: "")
     private var working = false
     private var contentTransitionID = 0
+    private var selectedPage: SettingsPage = .connections
 
     var onConnectionsChanged: (() -> Void)?
     var onUninstall: ((@escaping (Result<Void, Error>) -> Void) -> Void)?
@@ -49,15 +56,17 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
     init(
         pairings: PairingStore,
         pairer: RemoteHostPairer,
+        notificationSounds: NotificationSoundPlayer = NotificationSoundPlayer(),
         shouldReduceMotion: @escaping () -> Bool = {
             NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         }
     ) {
         self.pairings = pairings
         self.pairer = pairer
+        self.notificationSounds = notificationSounds
         self.shouldReduceMotion = shouldReduceMotion
         let window = SettingsWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 540),
+            contentRect: NSRect(x: 0, y: 0, width: 680, height: 620),
             styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -100,10 +109,75 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
 
     private func showAppropriateStep() {
         if CodexHookInstaller().isInstalled {
-            buildConnections()
+            buildSettingsPage(selectedPage)
         } else {
             buildLocalSetup()
         }
+    }
+
+    private func buildSettingsPage(_ page: SettingsPage) {
+        selectedPage = page
+        switch page {
+        case .sounds: buildSounds()
+        case .connections: buildConnections()
+        }
+    }
+
+    private func settingsHeader(selected: SettingsPage) -> NSView {
+        let mark = NSImageView(image: NSImage(
+            systemSymbolName: "sparkles.rectangle.stack.fill",
+            accessibilityDescription: nil
+        ) ?? NSImage())
+        mark.contentTintColor = NSColor(
+            calibratedRed: 0.40,
+            green: 0.91,
+            blue: 0.71,
+            alpha: 1
+        )
+        mark.translatesAutoresizingMaskIntoConstraints = false
+        let product = makeLabel("Codex Notch", size: 14, weight: .semibold, color: .white)
+        let sounds = settingsNavigationButton(
+            title: "Sounds",
+            symbol: "waveform",
+            active: selected == .sounds
+        ) { [weak self] in self?.transitionContent { self?.buildSettingsPage(.sounds) } }
+        let connections = settingsNavigationButton(
+            title: "Connections",
+            symbol: "point.3.connected.trianglepath.dotted",
+            active: selected == .connections
+        ) { [weak self] in self?.transitionContent { self?.buildSettingsPage(.connections) } }
+        let header = NSStackView(views: [mark, product, NSView(), sounds, connections])
+        header.orientation = .horizontal
+        header.alignment = .centerY
+        header.spacing = 8
+        NSLayoutConstraint.activate([
+            header.heightAnchor.constraint(equalToConstant: 30),
+            mark.widthAnchor.constraint(equalToConstant: 19),
+            mark.heightAnchor.constraint(equalToConstant: 19),
+            sounds.widthAnchor.constraint(equalToConstant: 96),
+            sounds.heightAnchor.constraint(equalToConstant: 30),
+            connections.widthAnchor.constraint(equalToConstant: 124),
+            connections.heightAnchor.constraint(equalToConstant: 30),
+        ])
+        return header
+    }
+
+    private func settingsNavigationButton(
+        title: String,
+        symbol: String,
+        active: Bool,
+        action: @escaping () -> Void
+    ) -> ClosureButton {
+        let button = ClosureButton(handler: action)
+        button.title = title
+        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        button.imagePosition = .imageLeading
+        button.font = .systemFont(ofSize: 11.5, weight: active ? .semibold : .medium)
+        button.contentTintColor = NSColor.white.withAlphaComponent(active ? 0.92 : 0.52)
+        button.layer?.backgroundColor = NSColor.white.withAlphaComponent(active ? 0.10 : 0).cgColor
+        button.layer?.cornerRadius = 8
+        button.translatesAutoresizingMaskIntoConstraints = false
+        return button
     }
 
     private func resetContent() {
@@ -249,7 +323,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
 
         let done = ClosureButton { [weak self] in
             UserDefaults.standard.set(true, forKey: Self.completionKey)
-            self?.transitionContent { self?.buildConnections() }
+            self?.transitionContent { self?.buildSettingsPage(.connections) }
         }
         done.title = "Hook trusted"
         stylePrimaryButton(done)
@@ -280,9 +354,109 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         ])
     }
 
+    private func buildSounds() {
+        resetContent()
+        let selected = notificationSounds.selectedSound
+        let header = settingsHeader(selected: .sounds)
+        let title = makeLabel("A finish worth hearing", size: 25, weight: .semibold, color: .white)
+        let subtitle = makeLabel(
+            "Six short completion tones, designed to stay satisfying even on a busy day.",
+            size: 13,
+            weight: .regular,
+            color: NSColor.white.withAlphaComponent(0.52)
+        )
+        let sectionTitle = makeLabel(
+            "COMPLETION TONE",
+            size: 10,
+            weight: .bold,
+            color: NSColor.white.withAlphaComponent(0.42)
+        )
+        let hint = makeLabel(
+            "Click any sound to preview it",
+            size: 11,
+            weight: .medium,
+            color: NSColor.white.withAlphaComponent(0.48)
+        )
+        let sectionHeader = NSStackView(views: [sectionTitle, NSView(), hint])
+        sectionHeader.orientation = .horizontal
+        sectionHeader.alignment = .centerY
+
+        let soundCards = NotificationSound.allCases
+            .filter { $0 != .none }
+            .map { sound -> NotificationSoundCardButton in
+                let card = NotificationSoundCardButton(sound: sound)
+                card.translatesAutoresizingMaskIntoConstraints = false
+                card.setSelected(sound == selected)
+                card.onSelect = { [weak self] sound in
+                    self?.notificationSounds.selectAndPreview(sound)
+                    self?.buildSounds()
+                }
+                return card
+            }
+        let rows = stride(from: 0, to: soundCards.count, by: 2).map { index -> NSStackView in
+            let row = NSStackView(views: [soundCards[index], soundCards[index + 1]])
+            row.orientation = .horizontal
+            row.spacing = 10
+            row.distribution = .fillEqually
+            return row
+        }
+        let grid = NSStackView(views: rows)
+        grid.orientation = .vertical
+        grid.spacing = 9
+        grid.distribution = .fillEqually
+
+        let silent = NotificationSoundCardButton(sound: .none)
+        silent.translatesAutoresizingMaskIntoConstraints = false
+        silent.setSelected(selected == .none)
+        silent.onSelect = { [weak self] sound in
+            self?.notificationSounds.selectAndPreview(sound)
+            self?.buildSounds()
+        }
+
+        let context = makeLabel(
+            "Plays only for newly accepted local or remote Stop-hook events. Opening the notch yourself stays quiet.",
+            size: 11.5,
+            weight: .regular,
+            color: NSColor.white.withAlphaComponent(0.42)
+        )
+        context.maximumNumberOfLines = 2
+
+        let stack = NSStackView(
+            views: [header, title, subtitle, sectionHeader, grid, silent, context]
+        )
+        configureStack(stack)
+        stack.spacing = 0
+        stack.setCustomSpacing(24, after: header)
+        stack.setCustomSpacing(7, after: title)
+        stack.setCustomSpacing(24, after: subtitle)
+        stack.setCustomSpacing(8, after: sectionHeader)
+        stack.setCustomSpacing(10, after: grid)
+        stack.setCustomSpacing(16, after: silent)
+        content.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: content.topAnchor),
+            header.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            sectionHeader.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            grid.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            grid.heightAnchor.constraint(equalToConstant: 210),
+            silent.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            silent.heightAnchor.constraint(equalToConstant: 54),
+            context.widthAnchor.constraint(equalTo: stack.widthAnchor),
+        ])
+    }
+
     private func buildConnections() {
         resetContent()
+        let header = settingsHeader(selected: .connections)
         let title = makeLabel("Connections", size: 25, weight: .semibold, color: .white)
+        let subtitle = makeLabel(
+            "Choose where completed Codex tasks can reach this Mac.",
+            size: 13,
+            weight: .regular,
+            color: NSColor.white.withAlphaComponent(0.52)
+        )
         let local = connectionRow(label: "This Mac", detail: "Local hook", removable: nil)
 
         let remoteTitle = makeLabel(
@@ -335,9 +509,13 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         statusLabel.stringValue = ""
         configureStatusLabel()
 
-        let stack = NSStackView(views: [title, local, remoteTitle, hostList, pairRow, statusLabel, footer])
+        let stack = NSStackView(
+            views: [header, title, subtitle, local, remoteTitle, hostList, pairRow, statusLabel, footer]
+        )
         configureStack(stack)
-        stack.setCustomSpacing(22, after: title)
+        stack.setCustomSpacing(24, after: header)
+        stack.setCustomSpacing(7, after: title)
+        stack.setCustomSpacing(20, after: subtitle)
         stack.setCustomSpacing(28, after: local)
         stack.setCustomSpacing(8, after: remoteTitle)
         stack.setCustomSpacing(18, after: hostList)
@@ -346,6 +524,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
             stack.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             stack.trailingAnchor.constraint(equalTo: content.trailingAnchor),
             stack.topAnchor.constraint(equalTo: content.topAnchor),
+            header.widthAnchor.constraint(equalTo: stack.widthAnchor),
             local.widthAnchor.constraint(equalTo: stack.widthAnchor),
             hostList.widthAnchor.constraint(equalTo: stack.widthAnchor),
             pairRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
