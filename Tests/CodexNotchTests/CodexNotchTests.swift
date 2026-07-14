@@ -9,6 +9,104 @@ import XCTest
 final class CodexNotchTests: XCTestCase {
     private let threadID = "019f5d4f-3a8d-76c0-8c2d-19451190e028"
 
+    func testRateLimitParserReadsMainSevenDayWindowAsRemainingUsage() throws {
+        let response = Data("""
+        {"id":2,"result":{"rateLimits":{
+          "limitId":"codex",
+          "primary":{"usedPercent":37,"windowDurationMins":10080,"resetsAt":1784487540},
+          "secondary":null
+        },"rateLimitsByLimitId":null}}
+        """.utf8)
+
+        let limit = try XCTUnwrap(CodexRateLimitParser.weeklyLimit(from: response))
+
+        XCTAssertEqual(limit.remainingPercent, 63)
+        XCTAssertEqual(limit.resetsAt, Date(timeIntervalSince1970: 1_784_487_540))
+    }
+
+    func testRateLimitParserFindsWeeklyWindowByDurationNotFieldName() throws {
+        let response = Data("""
+        {"id":2,"result":{"rateLimits":{
+          "limitId":"codex",
+          "primary":{"usedPercent":20,"windowDurationMins":300,"resetsAt":1784000000},
+          "secondary":{"usedPercent":46,"windowDurationMins":10080,"resetsAt":1784600000}
+        }}}
+        """.utf8)
+
+        XCTAssertEqual(
+            try XCTUnwrap(CodexRateLimitParser.weeklyLimit(from: response)).remainingPercent,
+            54
+        )
+    }
+
+    func testRateLimitParserPrefersMainCodexBucketOverModelSpecificBuckets() throws {
+        let response = Data("""
+        {"id":2,"result":{
+          "rateLimits":{"limitId":"codex","primary":{"usedPercent":40,"windowDurationMins":10080}},
+          "rateLimitsByLimitId":{
+            "codex_bengalfox":{"limitId":"codex_bengalfox","primary":{"usedPercent":90,"windowDurationMins":10080}},
+            "codex":{"limitId":"codex","primary":{"usedPercent":40,"windowDurationMins":10080}}
+          }
+        }}
+        """.utf8)
+
+        XCTAssertEqual(
+            try XCTUnwrap(CodexRateLimitParser.weeklyLimit(from: response)).remainingPercent,
+            60
+        )
+    }
+
+    func testRateLimitParserDoesNotMislabelShortWindowAsWeekly() {
+        let response = Data("""
+        {"id":2,"result":{"rateLimits":{
+          "limitId":"codex","primary":{"usedPercent":20,"windowDurationMins":300}
+        }}}
+        """.utf8)
+
+        XCTAssertNil(CodexRateLimitParser.weeklyLimit(from: response))
+    }
+
+    func testCodexExecutableCandidatesCoverMacAppAndUserCLIInstalls() {
+        let paths = CodexExecutableLocator.candidates(
+            homeDirectory: URL(fileURLWithPath: "/Users/ralf"),
+            environment: ["PATH": "/custom/bin:/opt/homebrew/bin"]
+        ).map(\.path)
+
+        XCTAssertTrue(paths.contains("/Applications/Codex.app/Contents/Resources/codex"))
+        XCTAssertTrue(paths.contains("/Applications/ChatGPT.app/Contents/Resources/codex"))
+        XCTAssertTrue(paths.contains("/Users/ralf/.local/bin/codex"))
+        XCTAssertTrue(paths.contains("/opt/homebrew/bin/codex"))
+        XCTAssertTrue(paths.contains("/custom/bin/codex"))
+        XCTAssertEqual(paths.filter { $0 == "/opt/homebrew/bin/codex" }.count, 1)
+    }
+
+    func testAppServerClientCompletesHandshakeWithoutClosingStandardInput() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let executable = directory.appendingPathComponent("fake-codex")
+        try Data("""
+        #!/bin/sh
+        while IFS= read -r line; do
+          case "$line" in
+            *account/rateLimits/read*)
+              printf '%s\\n' '{"id":2,"result":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":37,"windowDurationMins":10080}}}}'
+              ;;
+          esac
+        done
+        """.utf8).write(to: executable)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: executable.path
+        )
+
+        let response = try CodexAppServerClient(timeout: 2).readRateLimits(executable: executable)
+
+        XCTAssertEqual(
+            try XCTUnwrap(CodexRateLimitParser.weeklyLimit(from: response)).remainingPercent,
+            63
+        )
+    }
+
     func testEventIDMatchesRemoteImplementation() {
         XCTAssertEqual(
             CompletionEvent.eventID(threadID: threadID, turnID: "turn-1"),
@@ -491,6 +589,23 @@ final class CodexNotchTests: XCTestCase {
         overlay.toggle()
 
         XCTAssertEqual(visibility, [true, false])
+    }
+
+    func testWeeklyLimitMakesUsageVisibleWithoutCompletedTasks() {
+        _ = NSApplication.shared
+        let overlay = OverlayController()
+        overlay.setWeeklyLimit(CodexWeeklyLimit(
+            remainingPercent: 63,
+            resetsAt: Date(timeIntervalSince1970: 1_784_487_540)
+        ))
+
+        XCTAssertTrue(overlay.hasContent)
+        overlay.toggle()
+
+        XCTAssertTrue(overlay.isVisibleForTesting)
+        XCTAssertEqual(overlay.weeklyLimitViewForTesting?.percentageTextForTesting, "63% left")
+        XCTAssertTrue(overlay.weeklyLimitViewForTesting?.resetTextForTesting.hasPrefix("Resets ") == true)
+        overlay.hide(immediately: true)
     }
 
     func testSettingsButtonClosesHUDBeforeOpeningSettings() {

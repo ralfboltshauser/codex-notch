@@ -1,6 +1,7 @@
 # Codex Notch
 
-Codex Notch is a native macOS overlay for finished Codex turns. It works
+Codex Notch is a native macOS overlay for finished Codex turns and remaining
+weekly Codex usage. It works
 entirely on one Mac, and can also receive completions from Ubuntu hosts over an
 existing Tailscale network. There is no hosted relay, account, or public port.
 
@@ -18,6 +19,12 @@ small JSON event atomically to:
 The app monitors that directory, persists the event, and shows it in the
 overlay. Opening an item uses the validated local `codex://threads/<uuid>` deep
 link. No network process is involved.
+
+The app also starts the installed Codex CLI's local `app-server` briefly to read
+the authenticated account's rolling rate-limit snapshot. The seven-day window
+is shown as a remaining percentage and reset time in the notch. Codex Notch
+never reads or stores Codex credentials, and refreshes the value after completed
+turns, after wake, when the notch is opened, and every five minutes.
 
 ### Ubuntu to Mac
 
@@ -108,6 +115,8 @@ Uninstall it with:
   credential UI or blocks on Keychain access.
 - Remote messages cannot provide a URL or command. Thread IDs must be UUIDs,
   and the app constructs the local or SSH action itself.
+- Weekly usage comes from Codex's local app-server protocol. Codex Notch does
+  not inspect auth files, browser storage, or terminal output.
 - Events contain only thread ID, turn ID, title, source identity, and timestamp.
   Working directories, prompts, transcripts, and model output are not sent.
 - Delivery is at least once. Content-derived event IDs make retries idempotent.
