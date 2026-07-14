@@ -97,7 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !hosts.isEmpty else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
             guard let self else { return }
-            hosts.forEach { pairer.flush($0) }
+            hosts.forEach { self.pairer.flush($0) }
         }
     }
 
