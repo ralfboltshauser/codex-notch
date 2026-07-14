@@ -26,6 +26,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
     private var working = false
 
     var onConnectionsChanged: (() -> Void)?
+    var onUninstall: ((@escaping (Result<Void, Error>) -> Void) -> Void)?
 
     init(pairings: PairingStore, pairer: RemoteHostPairer) {
         self.pairings = pairings
@@ -108,10 +109,11 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         let install = ClosureButton { [weak self] in self?.installLocalHook() }
         install.title = "Install local completion hook"
         stylePrimaryButton(install)
+        let uninstall = makeUninstallButton()
         statusLabel.stringValue = ""
         configureStatusLabel()
 
-        let stack = NSStackView(views: [icon, title, subtitle, install, statusLabel])
+        let stack = NSStackView(views: [icon, title, subtitle, install, statusLabel, uninstall])
         configureStack(stack)
         stack.setCustomSpacing(9, after: title)
         stack.setCustomSpacing(34, after: subtitle)
@@ -125,6 +127,8 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
             install.widthAnchor.constraint(equalTo: stack.widthAnchor),
             install.heightAnchor.constraint(equalToConstant: 42),
             statusLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            uninstall.widthAnchor.constraint(equalToConstant: 172),
+            uninstall.heightAnchor.constraint(equalToConstant: 40),
         ])
     }
 
@@ -222,10 +226,16 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         }
         done.title = "Done"
         styleSecondaryButton(done)
+
+        let uninstall = makeUninstallButton()
+        let spacer = NSView()
+        let footer = NSStackView(views: [uninstall, spacer, done])
+        footer.orientation = .horizontal
+        footer.alignment = .centerY
         statusLabel.stringValue = ""
         configureStatusLabel()
 
-        let stack = NSStackView(views: [title, local, remoteTitle, hostList, pairRow, statusLabel, done])
+        let stack = NSStackView(views: [title, local, remoteTitle, hostList, pairRow, statusLabel, footer])
         configureStack(stack)
         stack.setCustomSpacing(22, after: title)
         stack.setCustomSpacing(28, after: local)
@@ -243,9 +253,63 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
             pair.widthAnchor.constraint(equalToConstant: 92),
             pair.heightAnchor.constraint(equalToConstant: 40),
             statusLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            done.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            footer.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            uninstall.widthAnchor.constraint(equalToConstant: 172),
+            uninstall.heightAnchor.constraint(equalToConstant: 40),
+            done.widthAnchor.constraint(equalToConstant: 96),
             done.heightAnchor.constraint(equalToConstant: 40),
         ])
+    }
+
+    private func confirmUninstall() {
+        guard !working else { return }
+        let hostCount = pairings.hosts.count
+        let remoteDescription = hostCount == 0
+            ? "There are no paired remote hosts."
+            : "This also connects to and cleans \(hostCount) paired remote host\(hostCount == 1 ? "" : "s"); they must be reachable."
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Uninstall Codex Notch?"
+        alert.informativeText = "\(remoteDescription) The local hook, hook backups, retry services, queued completions, credentials, settings, and this app will be removed. Other Codex hooks are preserved."
+        alert.addButton(withTitle: "Uninstall Everywhere")
+        alert.addButton(withTitle: "Cancel")
+        alert.buttons.first?.hasDestructiveAction = true
+
+        let handle: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            self?.beginUninstall()
+        }
+        if let window {
+            alert.beginSheetModal(for: window, completionHandler: handle)
+        } else {
+            handle(alert.runModal())
+        }
+    }
+
+    private func beginUninstall() {
+        guard !working else { return }
+        guard let onUninstall else {
+            setStatus("The uninstall service is unavailable.", error: true)
+            return
+        }
+        working = true
+        let hostCount = pairings.hosts.count
+        setStatus(
+            hostCount == 0 ? "Cleaning this Mac…" : "Cleaning \(hostCount) remote host\(hostCount == 1 ? "" : "s") first…",
+            error: false
+        )
+        onUninstall { [weak self] result in
+            guard let self else { return }
+            self.working = false
+            switch result {
+            case .success:
+                self.setStatus("Cleanup complete. Closing Codex Notch…", error: false)
+            case .failure(let error):
+                self.onConnectionsChanged?()
+                self.buildConnections()
+                self.setStatus(error.localizedDescription, error: true)
+            }
+        }
     }
 
     private func installLocalHook() {
@@ -409,5 +473,22 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         button.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.08).cgColor
         button.layer?.cornerRadius = 7
         button.translatesAutoresizingMaskIntoConstraints = false
+    }
+
+    private func styleDestructiveButton(_ button: ClosureButton) {
+        button.bezelStyle = .rounded
+        button.font = .systemFont(ofSize: 12.5, weight: .semibold)
+        button.contentTintColor = NSColor.systemRed.withAlphaComponent(0.9)
+        button.wantsLayer = true
+        button.layer?.backgroundColor = NSColor.systemRed.withAlphaComponent(0.10).cgColor
+        button.layer?.cornerRadius = 7
+        button.translatesAutoresizingMaskIntoConstraints = false
+    }
+
+    private func makeUninstallButton() -> ClosureButton {
+        let button = ClosureButton { [weak self] in self?.confirmUninstall() }
+        button.title = "Uninstall Codex Notch…"
+        styleDestructiveButton(button)
+        return button
     }
 }

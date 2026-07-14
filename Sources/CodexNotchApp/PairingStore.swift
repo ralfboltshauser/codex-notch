@@ -128,6 +128,20 @@ final class PairingStore {
         return nil
     }
 
+    func removeAllCredentials() throws {
+        lock.lock()
+        do {
+            if FileManager.default.fileExists(atPath: tokensFileURL.path) {
+                try FileManager.default.removeItem(at: tokensFileURL)
+            }
+            storedTokens.removeAll()
+            lock.unlock()
+        } catch {
+            lock.unlock()
+            throw error
+        }
+    }
+
     private func persistHosts(_ hosts: [RemoteHost]) throws {
         try persist(hosts, to: fileURL)
     }

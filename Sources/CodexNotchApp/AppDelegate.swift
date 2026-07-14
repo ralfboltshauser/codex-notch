@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotKeys: GlobalHotKeys?
     private var onboarding: OnboardingWindowController?
     private var wakeObserver: NSObjectProtocol?
+    private var uninstalling = false
 
     private lazy var pairer = RemoteHostPairer(store: pairings) { [weak self] endpoint in
         guard let self else {
@@ -168,7 +169,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             _ = try? self?.startRemoteListener()
             self?.scheduleRemoteCatchUp()
         }
+        onboarding?.onUninstall = { [weak self] completion in
+            self?.uninstall(completion: completion)
+        }
         onboarding?.present()
+    }
+
+    private func uninstall(completion: @escaping (Result<Void, Error>) -> Void) {
+        guard !uninstalling else {
+            completion(.failure(NSError(
+                domain: "CodexNotch",
+                code: 41,
+                userInfo: [NSLocalizedDescriptionKey: "An uninstall is already in progress"]
+            )))
+            return
+        }
+        uninstalling = true
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            do {
+                try self.pairer.uninstallAll()
+            } catch {
+                DispatchQueue.main.async {
+                    self.uninstalling = false
+                    completion(.failure(error))
+                }
+                return
+            }
+            DispatchQueue.main.async {
+                do {
+                    try LocalApplicationUninstaller.prepare(pairings: self.pairings)
+                    completion(.success(()))
+                    NSApp.terminate(nil)
+                } catch {
+                    self.uninstalling = false
+                    completion(.failure(error))
+                }
+            }
+        }
     }
 
     private func activate(_ task: CompletedTask) -> Bool {
@@ -204,6 +242,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 enum CodexNotchApp {
     static func main() {
+        if CommandLine.arguments.contains("--prepare-uninstall") {
+            let pairings = PairingStore()
+            let pairer = RemoteHostPairer(store: pairings) { _ in }
+            do {
+                try pairer.uninstallAll()
+                try LocalApplicationUninstaller.removeRegistrationsAndHooks(pairings: pairings)
+                exit(0)
+            } catch {
+                FileHandle.standardError.write(Data("\(error.localizedDescription)\n".utf8))
+                exit(1)
+            }
+        }
         if CommandLine.arguments.contains("--uninstall-hook") {
             do {
                 try CodexHookInstaller().uninstall()

@@ -80,12 +80,55 @@ final class CodexNotchTests: XCTestCase {
             .compactMap { $0["command"] as? String }
         XCTAssertEqual(commands.filter { $0.contains(CodexHookInstaller.marker) }.count, 1)
         XCTAssertTrue(commands.contains("/existing-stop"))
+        let configFile = directory.appendingPathComponent("config.toml")
+        let ownedStateKey = "\(hooksFile.path):stop:1:0"
+        try Data("""
+        [hooks.state]
+
+        [hooks.state."\(ownedStateKey)"]
+        trusted_hash = "sha256:owned"
+
+        [hooks.state."plugin:unrelated"]
+        trusted_hash = "sha256:unrelated"
+        """.utf8).write(to: configFile)
 
         try installer.uninstall()
         XCTAssertFalse(installer.isInstalled)
         let final = try hooksRoot(at: hooksFile)
         let finalHooks = try XCTUnwrap(final["hooks"] as? [String: Any])
         XCTAssertNotNil(finalHooks["PostToolUse"])
+        let backup = try hooksRoot(at: hooksFile.appendingPathExtension("bak"))
+        let backupCommands = (((backup["hooks"] as? [String: Any])?["Stop"] as? [[String: Any]]) ?? [])
+            .flatMap { ($0["hooks"] as? [[String: Any]]) ?? [] }
+            .compactMap { $0["command"] as? String }
+        XCTAssertFalse(backupCommands.contains { $0.contains(CodexHookInstaller.marker) })
+        let config = try String(contentsOf: configFile, encoding: .utf8)
+        XCTAssertFalse(config.contains(ownedStateKey))
+        XCTAssertTrue(config.contains("plugin:unrelated"))
+    }
+
+    func testHookUninstallRemovesLegacyOwnedHookButPreservesOtherHandlers() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let hooksFile = directory.appendingPathComponent("hooks.json")
+        let root: [String: Any] = ["hooks": ["Stop": [["hooks": [
+            ["type": "command", "command": "/other --codex-hook"],
+            [
+                "type": "command",
+                "command": "'/Users/test/Applications/Ntfy Codex Overlay.app/Contents/MacOS/NtfyCodexOverlay' --codex-hook",
+                "statusMessage": "Sending completion to ntfy",
+            ],
+        ]]]]]
+        try JSONSerialization.data(withJSONObject: root).write(to: hooksFile)
+
+        try CodexHookInstaller(hooksFile: hooksFile, executableURL: directory).uninstall()
+
+        let cleaned = try hooksRoot(at: hooksFile)
+        let cleanedHooks = try XCTUnwrap(cleaned["hooks"] as? [String: Any])
+        let groups = try XCTUnwrap(cleanedHooks["Stop"] as? [[String: Any]])
+        let handlers = try XCTUnwrap(groups.first?["hooks"] as? [[String: Any]])
+        let commands = handlers.compactMap { $0["command"] as? String }
+        XCTAssertEqual(commands, ["/other --codex-hook"])
     }
 
     func testTaskStorePersistsLatestNineAndDeduplicates() throws {
@@ -171,6 +214,11 @@ final class CodexNotchTests: XCTestCase {
         let attributes = try FileManager.default.attributesOfItem(atPath: tokensFile.path)
         let permissions = try XCTUnwrap(attributes[.posixPermissions] as? NSNumber)
         XCTAssertEqual(permissions.intValue & 0o777, 0o600)
+
+        try reloaded.removeAllCredentials()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: tokensFile.path))
+        XCTAssertNil(reloaded.host(authenticating: token))
+        XCTAssertEqual(reloaded.hosts, [host])
     }
 
     func testLegacyPairingRecoversMissingTokenIntoPrivateFile() throws {
@@ -420,6 +468,18 @@ final class CodexNotchTests: XCTestCase {
         listener.stop()
         try listener.start(host: "127.0.0.1", port: port)
         try listener.waitUntilReady(timeout: 2)
+    }
+
+    func testLocalUninstallerIncludesCurrentAndLegacyArtifacts() {
+        let bundle = URL(fileURLWithPath: "/tmp/Codex Notch.app")
+        let paths = Set(LocalApplicationUninstaller.cleanupArtifacts(bundleURL: bundle).map(\.path))
+        let library = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0].path
+
+        XCTAssertTrue(paths.contains("\(library)/Application Support/Codex Notch"))
+        XCTAssertTrue(paths.contains("\(library)/Caches/com.ralfbuilds.CodexNotch"))
+        XCTAssertTrue(paths.contains("\(library)/Preferences/com.ralfbuilds.CodexNotch.plist"))
+        XCTAssertTrue(paths.contains("\(library)/Application Support/Ntfy Codex Overlay"))
+        XCTAssertTrue(paths.contains("\(library)/LaunchAgents/com.ralfbuilds.ntfy-codex-overlay.plist"))
     }
 
     private func makeEvent() -> CompletionEvent {

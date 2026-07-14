@@ -55,6 +55,10 @@ def hooks_file():
     return codex_home() / "hooks.json"
 
 
+def codex_config_file():
+    return codex_home() / "config.toml"
+
+
 def clean_text(value, fallback, maximum):
     cleaned = " ".join(str(value or "").split())
     return (cleaned or fallback)[:maximum]
@@ -344,8 +348,74 @@ def remove_our_handlers(root):
     return root
 
 
-def write_hooks(path, root):
-    if path.exists():
+def contains_our_handlers(root):
+    hooks = root.get("hooks")
+    if not isinstance(hooks, dict):
+        return False
+    groups = hooks.get("Stop")
+    if not isinstance(groups, list):
+        return False
+    return any(
+        is_our_handler(handler)
+        for group in groups
+        if isinstance(group, dict) and isinstance(group.get("hooks"), list)
+        for handler in group["hooks"]
+    )
+
+
+def hook_state_keys(root, source_path):
+    hooks = root.get("hooks")
+    if not isinstance(hooks, dict):
+        return set()
+    groups = hooks.get("Stop")
+    if not isinstance(groups, list):
+        return set()
+    keys = set()
+    for group_index, group in enumerate(groups):
+        if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
+            continue
+        for handler_index, handler in enumerate(group["hooks"]):
+            if is_our_handler(handler):
+                keys.add("%s:stop:%d:%d" % (source_path, group_index, handler_index))
+    return keys
+
+
+def remove_hook_state(keys):
+    path = codex_config_file()
+    if not keys or not path.exists():
+        return
+    header = re.compile(r'^\[hooks\.state\.("(?:\\.|[^"\\])*")\]\s*$')
+    original = path.read_text(encoding="utf-8")
+    filtered = []
+    skipping = False
+    for line in original.splitlines(keepends=True):
+        stripped = line.strip()
+        if stripped.startswith("["):
+            match = header.fullmatch(stripped)
+            skipping = bool(match and json.loads(match.group(1)) in keys)
+        if not skipping:
+            filtered.append(line)
+    updated = "".join(filtered)
+    if updated == original:
+        return
+    descriptor, temporary_name = tempfile.mkstemp(prefix=path.name + ".", dir=str(path.parent))
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(updated)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary_name, 0o600)
+        os.replace(temporary_name, path)
+    except Exception:
+        try:
+            os.unlink(temporary_name)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def write_hooks(path, root, create_backup=True):
+    if create_backup and path.exists():
         backup = path.with_name(path.name + ".bak")
         backup.write_bytes(path.read_bytes())
         os.chmod(backup, 0o600)
@@ -407,8 +477,17 @@ def install(configuration, script_path=None):
 
 
 def uninstall():
-    if hooks_file().exists():
-        write_hooks(hooks_file(), remove_our_handlers(read_hooks(hooks_file())))
+    hook_paths = (hooks_file(), hooks_file().with_name(hooks_file().name + ".bak"))
+    state_keys = set()
+    for path in hook_paths:
+        if path.exists():
+            if "--codex-notch-remote-hook" not in path.read_text(encoding="utf-8", errors="ignore"):
+                continue
+            root = read_hooks(path)
+            if contains_our_handlers(root):
+                state_keys.update(hook_state_keys(root, hooks_file()))
+                write_hooks(path, remove_our_handlers(root), create_backup=False)
+    remove_hook_state(state_keys)
     systemd = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "systemd" / "user"
     try:
         subprocess.run(
@@ -435,13 +514,15 @@ def uninstall():
         subprocess.run(["systemctl", "--user", "daemon-reload"], check=False, timeout=5)
     except (OSError, subprocess.SubprocessError):
         pass
+    shutil.rmtree(config_root(), ignore_errors=True)
+    shutil.rmtree(state_root(), ignore_errors=True)
+    installed_script = Path.home() / ".local" / "lib" / "codex-notch" / "codex_notch_remote-v1.py"
     try:
-        config_file().unlink()
+        installed_script.unlink()
     except FileNotFoundError:
         pass
-    shutil.rmtree(state_root(), ignore_errors=True)
     try:
-        config_root().rmdir()
+        installed_script.parent.rmdir()
     except OSError:
         pass
 
