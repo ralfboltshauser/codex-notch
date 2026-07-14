@@ -4,7 +4,6 @@ import QuartzCore
 private enum NotchMotion {
     static let easeOut = CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1)
     static let eventOpenDuration: TimeInterval = 0.24
-    static let shortcutOpenDuration: TimeInterval = 0.16
     static let closeDuration: TimeInterval = 0.17
     static let launchDuration: TimeInterval = 0.18
 }
@@ -314,14 +313,22 @@ final class TaskRowView: NSView {
     let task: CompletedTask
 
     private let openHandler: () -> Void
+    private let shouldReduceMotion: () -> Bool
     private let dismissButton: ClosureButton
     private var tracking: NSTrackingArea?
     private var isHovered = false
     private var isTrackingPress = false
     private var isPressed = false
 
-    init(task: CompletedTask, index: Int, open: @escaping () -> Void, dismiss: @escaping () -> Void) {
+    init(
+        task: CompletedTask,
+        index: Int,
+        shouldReduceMotion: @escaping () -> Bool,
+        open: @escaping () -> Void,
+        dismiss: @escaping () -> Void
+    ) {
         self.task = task
+        self.shouldReduceMotion = shouldReduceMotion
         openHandler = open
         dismissButton = ClosureButton(handler: dismiss)
         super.init(frame: .zero)
@@ -416,7 +423,7 @@ final class TaskRowView: NSView {
         let targetBackground = NSColor.white.withAlphaComponent(
             isPressed ? 0.13 : (isHovered ? 0.075 : 0)
         ).cgColor
-        let targetTransform = isPressed
+        let targetTransform = isPressed && !shouldReduceMotion()
             ? CATransform3DMakeScale(0.985, 0.985, 1)
             : CATransform3DIdentity
         let currentBackground = layer.presentation()?.backgroundColor
@@ -657,14 +664,14 @@ final class OverlayController {
         case .hidden:
             targetScreen = screenUnderPointer()
             isPinned = true
-            present(autoHide: false, duration: NotchMotion.shortcutOpenDuration)
+            present(autoHide: false, duration: 0)
         case .closing:
             isPinned = true
-            present(autoHide: false, duration: NotchMotion.shortcutOpenDuration)
+            present(autoHide: false, duration: 0)
         case .launching:
             break
         case .opening, .open:
-            hide()
+            hide(immediately: true)
         }
     }
 
@@ -716,20 +723,23 @@ final class OverlayController {
         panel.alphaValue = 1
         if wasHidden { panel.orderFrontRegardless() }
 
-        let reduceMotion = shouldReduceMotion()
+        let shouldAnimate = duration > 0 && !shouldReduceMotion()
         phase = .opening
-        if reduceMotion {
-            rootView?.setInitialState(expanded: true)
-        } else {
+        if shouldAnimate {
             rootView?.animateExpansion(expanded: true, duration: duration)
             rootView?.animateContentIn(duration: min(0.16, duration))
+        } else {
+            rootView?.setInitialState(expanded: true)
+            phase = .open
+            finishPendingRebuild(expanded: true)
         }
 
-        let completionDelay = reduceMotion ? 0 : duration
-        DispatchQueue.main.asyncAfter(deadline: .now() + completionDelay) { [weak self] in
-            guard let self, self.transitionID == presentingTransitionID else { return }
-            self.phase = .open
-            self.finishPendingRebuild(expanded: true)
+        if shouldAnimate {
+            DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
+                guard let self, self.transitionID == presentingTransitionID else { return }
+                self.phase = .open
+                self.finishPendingRebuild(expanded: true)
+            }
         }
         if autoHide { scheduleHide(after: Self.eventVisibilityDuration) }
     }
@@ -871,6 +881,7 @@ final class OverlayController {
             let row = TaskRowView(
                 task: task,
                 index: index,
+                shouldReduceMotion: shouldReduceMotion,
                 open: { [weak self] in self?.openTask(task) },
                 dismiss: { [weak self] in self?.onDismiss?(index) }
             )
