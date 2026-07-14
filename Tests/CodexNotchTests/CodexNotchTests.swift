@@ -137,7 +137,7 @@ final class CodexNotchTests: XCTestCase {
             url: URL(string: "codex://threads/\(threadID)")!,
             receivedAt: Date()
         )])
-        XCTAssertEqual(overlay.bodyWidthForTesting, 680, accuracy: 0.5)
+        XCTAssertEqual(overlay.bodyWidthForTesting, 820, accuracy: 0.5)
         XCTAssertEqual(
             overlay.bodyHeightForTesting,
             overlay.notchHeightForTesting + 110,
@@ -156,7 +156,12 @@ final class CodexNotchTests: XCTestCase {
         XCTAssertTrue(overlay.isPinnedForTesting)
         XCTAssertFalse(overlay.hasHideTimerForTesting)
         let expandedPath = try! XCTUnwrap((view.layer?.mask as? CAShapeLayer)?.path)
+        XCTAssertTrue(expandedPath.contains(CGPoint(x: 1, y: view.bounds.maxY - 1)))
+        XCTAssertTrue(expandedPath.contains(CGPoint(x: view.bounds.maxX - 1, y: view.bounds.maxY - 1)))
         XCTAssertTrue(expandedPath.contains(CGPoint(x: view.bounds.midX, y: 1)))
+        XCTAssertFalse(expandedPath.contains(CGPoint(x: 1, y: 1)))
+        let expandedBodyInset = (view.bounds.width - overlay.bodyWidthForTesting) / 2
+        XCTAssertTrue(expandedPath.contains(CGPoint(x: expandedBodyInset + 1, y: 1)))
         overlay.hide(immediately: true)
         overlay.showForEvent()
         XCTAssertTrue(overlay.hasHideTimerForTesting)
