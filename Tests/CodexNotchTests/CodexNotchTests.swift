@@ -1,5 +1,6 @@
 import AppKit
 import CodexNotchCore
+import Network
 import XCTest
 @testable import CodexNotchApp
 
@@ -215,6 +216,17 @@ final class CodexNotchTests: XCTestCase {
         overlay.setUpdateAvailable(version: nil)
         XCTAssertFalse(overlay.hasContent)
         overlay.hide(immediately: true)
+    }
+
+    func testTailscaleListenerReportsReadyBeforePairingContinues() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pairings = PairingStore(fileURL: directory.appendingPathComponent("pairings.json"))
+        let listener = TailscaleListener(pairings: pairings) { _ in .accepted }
+        defer { listener.stop() }
+
+        try listener.start(host: "127.0.0.1", port: .any)
+        try listener.waitUntilReady(timeout: 2)
     }
 
     private func makeEvent() -> CompletionEvent {

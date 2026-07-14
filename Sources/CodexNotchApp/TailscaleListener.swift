@@ -2,6 +2,30 @@ import CodexNotchCore
 import Foundation
 import Network
 
+private final class ListenerStartupState {
+    enum Outcome {
+        case ready
+        case failed(Error)
+    }
+
+    private let lock = NSLock()
+    private var storedOutcome: Outcome?
+
+    func resolve(_ outcome: Outcome) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard storedOutcome == nil else { return false }
+        storedOutcome = outcome
+        return true
+    }
+
+    var outcome: Outcome? {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedOutcome
+    }
+}
+
 final class TailscaleListener {
     static let defaultPort: NWEndpoint.Port = 47391
     static let maximumFrameSize = 4096
@@ -10,6 +34,8 @@ final class TailscaleListener {
     private let delivery: (CompletionEvent) -> CompletionAcceptance
     private let queue = DispatchQueue(label: "com.ralfbuilds.codex-notch.tailscale")
     private var listener: NWListener?
+    private var startup: ListenerStartupState?
+    private var startupGroup: DispatchGroup?
 
     init(
         pairings: PairingStore,
@@ -25,14 +51,65 @@ final class TailscaleListener {
         parameters.allowLocalEndpointReuse = true
         parameters.requiredLocalEndpoint = .hostPort(host: NWEndpoint.Host(host), port: port)
         let listener = try NWListener(using: parameters, on: port)
+        let startup = ListenerStartupState()
+        let startupGroup = DispatchGroup()
+        startupGroup.enter()
         listener.newConnectionHandler = { [weak self] connection in self?.accept(connection) }
         listener.stateUpdateHandler = { state in
-            if case .failed(let error) = state {
+            switch state {
+            case .ready:
+                if startup.resolve(.ready) { startupGroup.leave() }
+            case .failed(let error):
                 FileHandle.standardError.write(Data("Codex Notch listener failed: \(error)\n".utf8))
+                if startup.resolve(.failed(error)) { startupGroup.leave() }
+            case .cancelled:
+                let error = NSError(
+                    domain: "CodexNotch",
+                    code: 31,
+                    userInfo: [NSLocalizedDescriptionKey: "The Tailscale receiver was cancelled before it became ready"]
+                )
+                if startup.resolve(.failed(error)) { startupGroup.leave() }
+            default:
+                break
             }
         }
         self.listener = listener
+        self.startup = startup
+        self.startupGroup = startupGroup
         listener.start(queue: queue)
+    }
+
+    func waitUntilReady(timeout: TimeInterval = 3) throws {
+        guard let startup, let startupGroup else {
+            throw NSError(
+                domain: "CodexNotch",
+                code: 34,
+                userInfo: [NSLocalizedDescriptionKey: "The Tailscale receiver has not been started"]
+            )
+        }
+        guard startupGroup.wait(timeout: .now() + max(0.1, timeout)) == .success else {
+            stop()
+            throw NSError(
+                domain: "CodexNotch",
+                code: 30,
+                userInfo: [NSLocalizedDescriptionKey: "The Tailscale receiver did not become ready in time"]
+            )
+        }
+        guard let outcome = startup.outcome else {
+            stop()
+            throw NSError(
+                domain: "CodexNotch",
+                code: 35,
+                userInfo: [NSLocalizedDescriptionKey: "The Tailscale receiver returned no startup state"]
+            )
+        }
+        if case .failed(let error) = outcome {
+            throw NSError(
+                domain: "CodexNotch",
+                code: 32,
+                userInfo: [NSLocalizedDescriptionKey: "Could not start the Tailscale receiver: \(error.localizedDescription)"]
+            )
+        }
     }
 
     func stop() {

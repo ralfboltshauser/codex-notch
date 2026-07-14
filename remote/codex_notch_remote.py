@@ -16,6 +16,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 
 
@@ -215,6 +216,27 @@ def send_envelope(configuration, kind, event=None, timeout=2):
         if response_length > MAX_FRAME_SIZE:
             raise ValueError("acknowledgement frame is too large")
         return json.loads(receive_exact(connection, response_length))
+
+
+def ping_receiver(configuration, attempts=1, timeout=2, retry_delay=0.25):
+    attempts = max(1, min(10, int(attempts)))
+    last_error = None
+    for attempt in range(attempts):
+        try:
+            acknowledgement = send_envelope(configuration, "ping", timeout=timeout)
+            if acknowledgement.get("status") != "pong":
+                raise ConnectionError("the Mac receiver rejected the pairing ping")
+            return acknowledgement
+        except (OSError, ValueError, ConnectionError) as error:
+            last_error = error
+            if attempt + 1 < attempts:
+                time.sleep(retry_delay)
+    endpoint = "%s:%s" % (configuration["endpoint_host"], configuration["endpoint_port"])
+    raise ConnectionError(
+        "Could not reach Codex Notch on this Mac at %s. "
+        "Make sure Codex Notch and Tailscale are running on the Mac. (%s)"
+        % (endpoint, last_error)
+    ) from last_error
 
 
 def flush_outbox(timeout=2):
@@ -432,7 +454,10 @@ def main(argv=None):
     actions.add_argument("--flush", action="store_true")
     actions.add_argument("--ping", action="store_true")
     actions.add_argument("--uninstall", action="store_true")
+    parser.add_argument("--ping-attempts", type=int, default=1, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    if args.ping_attempts < 1 or args.ping_attempts > 10:
+        parser.error("--ping-attempts must be between 1 and 10")
 
     if args.codex_notch_remote_hook_v1:
         return run_hook()
@@ -443,8 +468,12 @@ def main(argv=None):
         flush_outbox()
         return 0
     if args.ping:
-        acknowledgement = send_envelope(load_configuration(), "ping")
-        return 0 if acknowledgement.get("status") == "pong" else 1
+        try:
+            ping_receiver(load_configuration(), attempts=args.ping_attempts)
+            return 0
+        except (OSError, ValueError, ConnectionError) as error:
+            print(error, file=sys.stderr)
+            return 1
     uninstall()
     return 0
 
