@@ -130,6 +130,23 @@ final class CodexNotchTests: XCTestCase {
         XCTAssertEqual(object["protocol_version"] as? Int, 1)
     }
 
+    func testRemoteSSHFailuresHideTracebacksAndStayBounded() {
+        let traceback = """
+        Traceback (most recent call last):
+          File \"remote.py\", line 1, in <module>
+        ValueError: invalid remote configuration
+        """
+        XCTAssertEqual(
+            RemoteHostPairer.userFacingSSHError(traceback),
+            "ValueError: invalid remote configuration"
+        )
+        XCTAssertEqual(RemoteHostPairer.userFacingSSHError("  \n"), "SSH command failed")
+        XCTAssertEqual(
+            RemoteHostPairer.userFacingSSHError(String(repeating: "x", count: 500)).count,
+            360
+        )
+    }
+
     func testPairingTokensPersistInPrivateFileAndAuthenticateWithoutKeychain() throws {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

@@ -189,13 +189,30 @@ final class RemoteHostPairer {
             let message = String(
                 decoding: stderr.fileHandleForReading.readDataToEndOfFile(),
                 as: UTF8.self
-            ).trimmingCharacters(in: .whitespacesAndNewlines)
+            )
             throw NSError(
                 domain: "CodexNotch",
                 code: Int(process.terminationStatus),
-                userInfo: [NSLocalizedDescriptionKey: message.isEmpty ? "SSH command failed" : message]
+                userInfo: [NSLocalizedDescriptionKey: Self.userFacingSSHError(message)]
             )
         }
+    }
+
+    static func userFacingSSHError(_ rawMessage: String) -> String {
+        let message = rawMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        let conciseMessage: String
+        if message.contains("Traceback") {
+            conciseMessage = message
+                .components(separatedBy: .newlines)
+                .reversed()
+                .first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty })?
+                .trimmingCharacters(in: .whitespaces) ?? "Remote command failed"
+        } else {
+            conciseMessage = message
+        }
+        return conciseMessage.isEmpty
+            ? "SSH command failed"
+            : String(conciseMessage.prefix(360))
     }
 
     private func runSSHForOutput(alias: String, command: String) throws -> Data {
