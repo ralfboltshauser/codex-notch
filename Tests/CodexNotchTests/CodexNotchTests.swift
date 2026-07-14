@@ -337,6 +337,118 @@ final class CodexNotchTests: XCTestCase {
         XCTAssertFalse(overlay.isVisibleForTesting)
     }
 
+    func testKeyboardTaskOpenHandsOffImmediatelyWithoutMotion() {
+        _ = NSApplication.shared
+        let overlay = OverlayController(shouldReduceMotion: { false })
+        let task = CompletedTask(
+            eventID: String(repeating: "e", count: 64),
+            title: "Open from keyboard",
+            url: URL(string: "codex://threads/\(threadID)")!,
+            receivedAt: Date()
+        )
+        overlay.update(tasks: [task])
+        var finishedTask: CompletedTask?
+        overlay.onOpen = { _ in true }
+        overlay.onOpenFinished = { finishedTask = $0 }
+
+        overlay.toggle()
+        overlay.openTask(at: 0, animated: false)
+
+        XCTAssertEqual(finishedTask, task)
+        XCTAssertFalse(overlay.isLaunchingForTesting)
+        XCTAssertFalse(overlay.isVisibleForTesting)
+    }
+
+    func testKeyboardTaskDismissIsImmediate() {
+        _ = NSApplication.shared
+        let overlay = OverlayController(shouldReduceMotion: { false })
+        overlay.update(tasks: [CompletedTask(
+            eventID: String(repeating: "f", count: 64),
+            title: "Dismiss from keyboard",
+            url: URL(string: "codex://threads/\(threadID)")!,
+            receivedAt: Date()
+        )])
+        var dismissedIndex: Int?
+        overlay.onDismiss = { dismissedIndex = $0 }
+        overlay.toggle()
+
+        overlay.dismissTask(at: 0, animated: false)
+
+        XCTAssertEqual(dismissedIndex, 0)
+        overlay.hide(immediately: true)
+    }
+
+    func testAnimatedDismissTracksTaskIdentityAcrossConcurrentInsertion() {
+        _ = NSApplication.shared
+        let overlay = OverlayController(shouldReduceMotion: { false })
+        let dismissedTask = CompletedTask(
+            eventID: String(repeating: "4", count: 64),
+            title: "Dismiss this task",
+            url: URL(string: "codex://threads/\(threadID)")!,
+            receivedAt: Date()
+        )
+        let insertedTask = CompletedTask(
+            eventID: String(repeating: "5", count: 64),
+            title: "Arrived during dismissal",
+            url: URL(string: "codex://threads/\(threadID)")!,
+            receivedAt: Date()
+        )
+        overlay.update(tasks: [dismissedTask])
+        overlay.toggle()
+        let dismissed = expectation(description: "task dismissed after exit motion")
+        overlay.onDismiss = { index in
+            XCTAssertEqual(index, 1)
+            dismissed.fulfill()
+        }
+
+        overlay.dismissTask(at: 0)
+        overlay.update(tasks: [insertedTask, dismissedTask])
+
+        wait(for: [dismissed], timeout: 1)
+        overlay.hide(immediately: true)
+    }
+
+    func testNewTaskGetsContextualArrivalMotionWhileNotchIsOpen() {
+        _ = NSApplication.shared
+        let overlay = OverlayController(shouldReduceMotion: { false })
+        let first = CompletedTask(
+            eventID: String(repeating: "1", count: 64),
+            title: "First task",
+            url: URL(string: "codex://threads/\(threadID)")!,
+            receivedAt: Date()
+        )
+        let second = CompletedTask(
+            eventID: String(repeating: "2", count: 64),
+            title: "Second task",
+            url: URL(string: "codex://threads/\(threadID)")!,
+            receivedAt: Date()
+        )
+        overlay.update(tasks: [first])
+        overlay.toggle()
+
+        overlay.update(tasks: [second, first])
+
+        XCTAssertEqual(overlay.rowArrivalAnimationCountForTesting, 1)
+        overlay.hide(immediately: true)
+    }
+
+    func testReducedMotionEventUsesOpacityContinuity() {
+        _ = NSApplication.shared
+        let overlay = OverlayController(shouldReduceMotion: { true })
+        overlay.update(tasks: [CompletedTask(
+            eventID: String(repeating: "3", count: 64),
+            title: "Reduced motion task",
+            url: URL(string: "codex://threads/\(threadID)")!,
+            receivedAt: Date()
+        )])
+
+        overlay.showForEvent()
+
+        XCTAssertTrue(overlay.isVisibleForTesting)
+        XCTAssertTrue(overlay.hasContentAnimationForTesting)
+        overlay.hide(immediately: true)
+    }
+
     func testUpdateAvailabilityAddsClickablePersistentContent() {
         _ = NSApplication.shared
         let overlay = OverlayController()
