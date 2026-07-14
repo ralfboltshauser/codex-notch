@@ -181,6 +181,8 @@ final class HUDContentView: NSView {
         let progress = min(1, max(0, expansion))
         let width = rect.width
         let height = rect.height
+        // Keep the mathematical edge outside the clipped layer. An edge exactly
+        // at maxY gets anti-aliased into a one-pixel seam on bright desktops.
         let top = height + 2
         let center = min(
             width - notchWidth / 2 - 12,
@@ -191,31 +193,44 @@ final class HUDContentView: NSView {
         let neckRight = center + neckHalfWidth
         let neckBottom = max(0, height - notchHeight)
         let closedRadius = min(CGFloat(10), min(notchHeight * 0.38, neckHalfWidth / 2))
-        let expandedRadius = min(CGFloat(26), (width - bodyInset * 2) / 4)
+        let expandedRadius = min(CGFloat(28), (width - bodyInset * 2) / 4)
         let bottomRadius = interpolate(closedRadius, expandedRadius, progress)
         let bodyLeft = interpolate(neckLeft, bodyInset, progress)
         let bodyRight = interpolate(neckRight, width - bodyInset, progress)
         let bodyBottom = interpolate(neckBottom, 0, progress)
         let neckEdgeBottom = interpolate(neckBottom + closedRadius, neckBottom + 4, progress)
+        let topLeft = interpolate(neckLeft, 0, progress)
+        let topRight = interpolate(neckRight, width, progress)
+        let shoulderStartY = interpolate(neckEdgeBottom, top, progress)
         let shoulderBottom = interpolate(
             neckBottom + closedRadius,
-            max(bodyBottom + bottomRadius, neckBottom - 18),
+            max(32, height - notchHeight),
+            progress
+        )
+        let expandedShoulderControlY = height - notchHeight * 0.46
+        let shoulderControlY = interpolate(
+            shoulderBottom,
+            expandedShoulderControlY,
             progress
         )
 
+        // Expanded, the whole top edge is black and clipped by the display
+        // boundary. The body narrows through the shoulders like one oversized
+        // notch. The extra zero-length lines preserve path compatibility with
+        // the compact hardware-notch shape during interruptible animation.
         let path = CGMutablePath()
-        path.move(to: CGPoint(x: neckLeft, y: top))
-        path.addLine(to: CGPoint(x: neckRight, y: top))
-        path.addLine(to: CGPoint(x: neckRight, y: neckEdgeBottom))
+        path.move(to: CGPoint(x: topLeft, y: top))
+        path.addLine(to: CGPoint(x: topRight, y: top))
+        path.addLine(to: CGPoint(x: topRight, y: shoulderStartY))
         path.addCurve(
             to: CGPoint(x: bodyRight, y: shoulderBottom),
             control1: CGPoint(
-                x: neckRight,
-                y: interpolate(neckEdgeBottom, neckBottom - 2, progress)
+                x: interpolate(neckRight, width - bodyInset * 0.52, progress),
+                y: shoulderStartY
             ),
             control2: CGPoint(
                 x: bodyRight,
-                y: shoulderBottom + 8 * progress
+                y: shoulderControlY
             )
         )
         path.addLine(to: CGPoint(x: bodyRight, y: bodyBottom + bottomRadius))
@@ -232,17 +247,17 @@ final class HUDContentView: NSView {
         )
         path.addLine(to: CGPoint(x: bodyLeft, y: shoulderBottom))
         path.addCurve(
-            to: CGPoint(x: neckLeft, y: neckEdgeBottom),
+            to: CGPoint(x: topLeft, y: shoulderStartY),
             control1: CGPoint(
                 x: bodyLeft,
-                y: shoulderBottom + 8 * progress
+                y: shoulderControlY
             ),
             control2: CGPoint(
-                x: neckLeft,
-                y: interpolate(neckEdgeBottom, neckBottom - 2, progress)
+                x: interpolate(neckLeft, bodyInset * 0.52, progress),
+                y: shoulderStartY
             )
         )
-        path.addLine(to: CGPoint(x: neckLeft, y: top))
+        path.addLine(to: CGPoint(x: topLeft, y: top))
         path.closeSubpath()
         return path
     }
@@ -966,7 +981,7 @@ final class OverlayController {
             }
         }
         let bodyInset: CGFloat = 34
-        let bodyWidth = min(680, max(500, screen.frame.width - 120))
+        let bodyWidth = min(820, max(460, screen.frame.width - 160))
         return IslandGeometry(
             windowWidth: bodyWidth + bodyInset * 2,
             bodyInset: bodyInset,
