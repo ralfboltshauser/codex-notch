@@ -27,6 +27,13 @@ install -m 0755 "$BIN_DIR/CodexNotchHook" "$APP_DIR/Contents/Helpers/CodexNotchH
 install -m 0755 "$SCRIPT_DIR/remote/codex_notch_remote.py" \
   "$APP_DIR/Contents/Resources/remote/codex_notch_remote.py"
 install -m 0644 "$SCRIPT_DIR/AppResources/Info.plist" "$APP_DIR/Contents/Info.plist"
+RESOURCE_BUNDLE=$(find "$BIN_DIR" -maxdepth 1 -type d \
+  -name 'CodexNotch_CodexNotchApp.bundle' -print -quit)
+if [ -z "$RESOURCE_BUNDLE" ]; then
+  echo "CodexNotchApp resource bundle was not found" >&2
+  exit 1
+fi
+ditto "$RESOURCE_BUNDLE" "$APP_DIR/Contents/Resources/$(basename "$RESOURCE_BUNDLE")"
 
 SPARKLE_FRAMEWORK=$(find "$SCRIPT_DIR/.build/artifacts" -type d \
   -path '*/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework' \

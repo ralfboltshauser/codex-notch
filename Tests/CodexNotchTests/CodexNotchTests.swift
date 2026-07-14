@@ -252,6 +252,32 @@ final class CodexNotchTests: XCTestCase {
         XCTAssertEqual(TaskStore(fileURL: file).tasks, store.tasks)
     }
 
+    func testNotificationSoundCatalogContainsSixBundledChoicesAndSilence() throws {
+        let audible = NotificationSound.allCases.filter { $0 != .none }
+
+        XCTAssertEqual(audible.count, 6)
+        XCTAssertEqual(Set(audible.map(\.rawValue)).count, 6)
+        XCTAssertTrue(audible.allSatisfy { $0.resourceURL != nil })
+        for sound in audible {
+            let url = try XCTUnwrap(sound.resourceURL)
+            XCTAssertGreaterThan(try Data(contentsOf: url).count, 1_000)
+        }
+        XCTAssertNil(NotificationSound.none.resourceURL)
+    }
+
+    func testNotificationSoundSelectionPersistsAndFallsBackSafely() throws {
+        let suiteName = "CodexNotchTests.NotificationSounds.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        XCTAssertEqual(NotificationSound.selected(in: defaults), .glassDrop)
+        NotificationSound.prism.select(in: defaults)
+        XCTAssertEqual(NotificationSound.selected(in: defaults), .prism)
+
+        defaults.set("removed-sound", forKey: NotificationSound.preferenceKey)
+        XCTAssertEqual(NotificationSound.selected(in: defaults), .glassDrop)
+    }
+
     func testNerdShortcutsUseSwissKeyboardLayoutAndOpenTenSlots() {
         XCTAssertEqual(
             GlobalHotKeys.nerdBindings.map(\.keyLabel),
