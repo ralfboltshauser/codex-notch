@@ -67,8 +67,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .toggle:
                 if self?.overlay.hasContent == true { self?.overlay.toggle() }
                 else { self?.showOnboarding() }
-            case .open(let index): self?.overlay.openTask(at: index)
-            case .dismiss(let index): self?.dismissTask(at: index)
+            case .open(let index): self?.overlay.openTask(at: index, animated: false)
+            case .dismiss(let index): self?.overlay.dismissTask(at: index, animated: false)
             }
         }
 

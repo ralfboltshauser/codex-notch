@@ -1,11 +1,17 @@
 import AppKit
 import QuartzCore
 
-private enum NotchMotion {
+enum NotchMotion {
     static let easeOut = CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1)
+    static let ease = CAMediaTimingFunction(controlPoints: 0.25, 0.10, 0.25, 1)
     static let eventOpenDuration: TimeInterval = 0.24
     static let closeDuration: TimeInterval = 0.17
     static let launchDuration: TimeInterval = 0.18
+    static let pressInDuration: TimeInterval = 0.10
+    static let pressOutDuration: TimeInterval = 0.14
+    static let rowArrivalDuration: TimeInterval = 0.18
+    static let rowDismissDuration: TimeInterval = 0.14
+    static let reducedMotionFadeDuration: TimeInterval = 0.12
 }
 
 final class FocuslessPanel: NSPanel {
@@ -15,6 +21,7 @@ final class FocuslessPanel: NSPanel {
 
 final class ClosureButton: NSButton {
     var handler: (() -> Void)?
+    private var pointerIsDown = false
 
     init(handler: (() -> Void)? = nil) {
         self.handler = handler
@@ -23,11 +30,44 @@ final class ClosureButton: NSButton {
         action = #selector(pressed)
         isBordered = false
         refusesFirstResponder = true
+        wantsLayer = true
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     @objc private func pressed() { handler?() }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        setPointerDown(true)
+        super.mouseDown(with: event)
+        setPointerDown(false)
+    }
+
+    private func setPointerDown(_ isDown: Bool) {
+        guard pointerIsDown != isDown, let layer else { return }
+        pointerIsDown = isDown
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let target = isDown && !reduceMotion
+            ? CATransform3DMakeScale(0.97, 0.97, 1)
+            : CATransform3DIdentity
+        let current = layer.presentation()?.transform ?? layer.transform
+        let duration = isDown
+            ? NotchMotion.pressInDuration
+            : NotchMotion.pressOutDuration
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.transform = target
+        CATransaction.commit()
+
+        layer.removeAnimation(forKey: "buttonPress")
+        let animation = CABasicAnimation(keyPath: "transform")
+        animation.fromValue = current
+        animation.toValue = target
+        animation.duration = duration
+        animation.timingFunction = NotchMotion.easeOut
+        layer.add(animation, forKey: "buttonPress")
+    }
 }
 
 final class HUDContentView: NSView {
@@ -132,6 +172,30 @@ final class HUDContentView: NSView {
             transform: CATransform3DMakeTranslation(0, 4, 0),
             duration: duration
         )
+    }
+
+    func prepareReducedMotionOpen() {
+        setInitialState(expanded: true)
+        guard let layer = contentHost?.layer else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.opacity = 0
+        layer.transform = CATransform3DIdentity
+        CATransaction.commit()
+    }
+
+    func animateReducedMotionContent(visible: Bool, duration: TimeInterval) {
+        guard let contentHost else { return }
+        animate(
+            view: contentHost,
+            opacity: visible ? 1 : 0,
+            transform: CATransform3DIdentity,
+            duration: duration
+        )
+    }
+
+    var hasContentAnimationForTesting: Bool {
+        contentHost?.layer?.animation(forKey: "notchContent") != nil
     }
 
     func animateLaunch(selectedRow: TaskRowView?) {
@@ -283,7 +347,7 @@ final class HUDContentView: NSView {
         onHoverChanged?(true)
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.12
-            context.timingFunction = NotchMotion.easeOut
+            context.timingFunction = NotchMotion.ease
             controls.forEach { $0.animator().alphaValue = 1 }
         }
     }
@@ -292,7 +356,7 @@ final class HUDContentView: NSView {
         onHoverChanged?(false)
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.14
-            context.timingFunction = NotchMotion.easeOut
+            context.timingFunction = NotchMotion.ease
             controls.forEach { $0.animator().alphaValue = 0 }
         }
     }
@@ -334,6 +398,7 @@ final class TaskRowView: NSView {
     private var isHovered = false
     private var isTrackingPress = false
     private var isPressed = false
+    private var isDismissing = false
 
     init(
         task: CompletedTask,
@@ -433,16 +498,22 @@ final class TaskRowView: NSView {
     private func setPressed(_ pressed: Bool) {
         guard isPressed != pressed else { return }
         isPressed = pressed
-        updateAppearance(duration: pressed ? 0.08 : 0.12)
+        updateAppearance(
+            duration: pressed ? NotchMotion.pressInDuration : NotchMotion.pressOutDuration,
+            timingFunction: NotchMotion.easeOut
+        )
     }
 
-    private func updateAppearance(duration: TimeInterval) {
+    private func updateAppearance(
+        duration: TimeInterval,
+        timingFunction: CAMediaTimingFunction
+    ) {
         guard let layer else { return }
         let targetBackground = NSColor.white.withAlphaComponent(
             isPressed ? 0.13 : (isHovered ? 0.075 : 0)
         ).cgColor
         let targetTransform = isPressed && !shouldReduceMotion()
-            ? CATransform3DMakeScale(0.985, 0.985, 1)
+            ? CATransform3DMakeScale(0.98, 0.98, 1)
             : CATransform3DIdentity
         let currentBackground = layer.presentation()?.backgroundColor
             ?? layer.backgroundColor
@@ -465,8 +536,111 @@ final class TaskRowView: NSView {
         let group = CAAnimationGroup()
         group.animations = [background, transform]
         group.duration = duration
-        group.timingFunction = NotchMotion.easeOut
+        group.timingFunction = timingFunction
         layer.add(group, forKey: "rowPress")
+    }
+
+    func animateArrival(reducedMotion: Bool, delay: TimeInterval = 0) {
+        guard let layer else { return }
+        let initialTransform = reducedMotion
+            ? CATransform3DIdentity
+            : CATransform3DMakeTranslation(0, 5, 0)
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.opacity = 1
+        layer.transform = CATransform3DIdentity
+        CATransaction.commit()
+
+        layer.removeAnimation(forKey: "rowArrival")
+        let opacity = CABasicAnimation(keyPath: "opacity")
+        opacity.fromValue = 0
+        opacity.toValue = 1
+        let transform = CABasicAnimation(keyPath: "transform")
+        transform.fromValue = initialTransform
+        transform.toValue = CATransform3DIdentity
+        let group = CAAnimationGroup()
+        group.animations = [opacity, transform]
+        group.beginTime = CACurrentMediaTime() + delay
+        group.duration = reducedMotion
+            ? NotchMotion.reducedMotionFadeDuration
+            : NotchMotion.rowArrivalDuration
+        group.fillMode = .backwards
+        group.timingFunction = NotchMotion.easeOut
+        layer.add(group, forKey: "rowArrival")
+    }
+
+    func animateReposition(from oldFrame: NSRect, to newFrame: NSRect) {
+        guard let layer else { return }
+        let deltaX = oldFrame.midX - newFrame.midX
+        let deltaY = oldFrame.midY - newFrame.midY
+        guard abs(deltaX) > 0.5 || abs(deltaY) > 0.5 else { return }
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.transform = CATransform3DIdentity
+        CATransaction.commit()
+
+        layer.removeAnimation(forKey: "rowReflow")
+        let animation = CABasicAnimation(keyPath: "transform")
+        animation.fromValue = CATransform3DMakeTranslation(deltaX, deltaY, 0)
+        animation.toValue = CATransform3DIdentity
+        animation.duration = NotchMotion.rowArrivalDuration
+        animation.timingFunction = NotchMotion.easeOut
+        layer.add(animation, forKey: "rowReflow")
+    }
+
+    func animateDismiss(delay: TimeInterval = 0, completion: (() -> Void)? = nil) {
+        guard !isDismissing, let layer else {
+            completion?()
+            return
+        }
+        isDismissing = true
+        isTrackingPress = false
+        isPressed = false
+        dismissButton.isEnabled = false
+        let currentOpacity = layer.presentation()?.opacity ?? layer.opacity
+        let currentTransform = layer.presentation()?.transform ?? layer.transform
+        let targetTransform = CATransform3DMakeTranslation(14, 0, 0)
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.opacity = 0
+        layer.transform = targetTransform
+        CATransaction.commit()
+
+        layer.removeAllAnimations()
+        let opacity = CABasicAnimation(keyPath: "opacity")
+        opacity.fromValue = currentOpacity
+        opacity.toValue = 0
+        let transform = CABasicAnimation(keyPath: "transform")
+        transform.fromValue = currentTransform
+        transform.toValue = targetTransform
+        let group = CAAnimationGroup()
+        group.animations = [opacity, transform]
+        group.beginTime = CACurrentMediaTime() + delay
+        group.duration = NotchMotion.rowDismissDuration
+        group.fillMode = .backwards
+        group.timingFunction = NotchMotion.easeOut
+        layer.add(group, forKey: "rowDismiss")
+
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + delay + NotchMotion.rowDismissDuration
+        ) {
+            completion?()
+        }
+    }
+
+    func holdInvisibleForPendingDismissal() {
+        guard let layer else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.opacity = 0
+        CATransaction.commit()
+    }
+
+    var hasArrivalAnimationForTesting: Bool {
+        layer?.animation(forKey: "rowArrival") != nil
     }
 
     func animateForLaunch(selected: Bool) {
@@ -521,20 +695,20 @@ final class TaskRowView: NSView {
 
     override func mouseEntered(with event: NSEvent) {
         isHovered = true
-        updateAppearance(duration: 0.10)
+        updateAppearance(duration: 0.10, timingFunction: NotchMotion.ease)
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.10
-            context.timingFunction = NotchMotion.easeOut
+            context.timingFunction = NotchMotion.ease
             dismissButton.animator().alphaValue = 1
         }
     }
 
     override func mouseExited(with event: NSEvent) {
         isHovered = false
-        if !isPressed { updateAppearance(duration: 0.12) }
+        if !isPressed { updateAppearance(duration: 0.12, timingFunction: NotchMotion.ease) }
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.12
-            context.timingFunction = NotchMotion.easeOut
+            context.timingFunction = NotchMotion.ease
             dismissButton.animator().alphaValue = 0
         }
     }
@@ -576,6 +750,7 @@ final class OverlayController {
     private weak var settingsButton: ClosureButton?
     private weak var rootView: HUDContentView?
     private var rowsByEventID: [String: TaskRowView] = [:]
+    private var dismissingEventIDs: Set<String> = []
 
     var onOpen: ((CompletedTask) -> Bool)?
     var onOpenFinished: ((CompletedTask) -> Void)?
@@ -598,6 +773,12 @@ final class OverlayController {
     var isUpdateAvailableForTesting: Bool { updateVersion != nil }
     var updateButtonForTesting: NSButton? { updateButton }
     var settingsButtonForTesting: NSButton? { settingsButton }
+    var rowArrivalAnimationCountForTesting: Int {
+        rowsByEventID.values.filter(\.hasArrivalAnimationForTesting).count
+    }
+    var hasContentAnimationForTesting: Bool {
+        rootView?.hasContentAnimationForTesting == true
+    }
     var hasContent: Bool { !tasks.isEmpty || updateVersion != nil }
 
     init(
@@ -630,6 +811,11 @@ final class OverlayController {
     }
 
     func update(tasks: [CompletedTask]) {
+        let previousEventIDs = Set(self.tasks.map(\.eventID))
+        let previousRowFrames = rowsByEventID.mapValues(screenFrame)
+        let insertedEventIDs = tasks
+            .map(\.eventID)
+            .filter { !previousEventIDs.contains($0) }
         self.tasks = tasks
         if !hasContent, phase != .launching {
             hide(immediately: true)
@@ -644,6 +830,18 @@ final class OverlayController {
         case .open:
             rebuildContent(initiallyExpanded: true)
             positionPanel()
+            if !shouldReduceMotion() {
+                for (eventID, oldFrame) in previousRowFrames {
+                    guard let row = rowsByEventID[eventID] else { continue }
+                    row.animateReposition(from: oldFrame, to: screenFrame(row))
+                }
+            }
+            for (index, eventID) in insertedEventIDs.enumerated() {
+                rowsByEventID[eventID]?.animateArrival(
+                    reducedMotion: shouldReduceMotion(),
+                    delay: min(Double(index) * 0.03, 0.09)
+                )
+            }
         }
     }
 
@@ -695,9 +893,49 @@ final class OverlayController {
         }
     }
 
-    func openTask(at index: Int) {
+    func openTask(at index: Int, animated: Bool = true) {
         guard tasks.indices.contains(index) else { return }
-        openTask(tasks[index])
+        openTask(tasks[index], animated: animated)
+    }
+
+    func dismissTask(at index: Int, animated: Bool = true) {
+        guard tasks.indices.contains(index) else { return }
+        let eventID = tasks[index].eventID
+        guard animated,
+              !shouldReduceMotion(),
+              phase == .open,
+              let row = rowsByEventID[eventID]
+        else {
+            onDismiss?(index)
+            return
+        }
+        dismissingEventIDs.insert(eventID)
+        row.animateDismiss { [weak self] in
+            guard let self else { return }
+            self.dismissingEventIDs.remove(eventID)
+            guard let currentIndex = self.tasks.firstIndex(where: { $0.eventID == eventID })
+            else { return }
+            self.onDismiss?(currentIndex)
+        }
+    }
+
+    func clearTasks(animated: Bool = true) {
+        let rows = tasks.compactMap { rowsByEventID[$0.eventID] }
+        guard animated, !shouldReduceMotion(), phase == .open, !rows.isEmpty else {
+            onClear?()
+            return
+        }
+        dismissingEventIDs.formUnion(tasks.map(\.eventID))
+        for (index, row) in rows.enumerated() {
+            let delay = min(Double(index) * 0.012, 0.10)
+            let completion: (() -> Void)? = index == rows.count - 1
+                ? { [weak self] in
+                    self?.dismissingEventIDs.removeAll()
+                    self?.onClear?()
+                }
+                : nil
+            row.animateDismiss(delay: delay, completion: completion)
+        }
     }
 
     func hide(immediately: Bool = false) {
@@ -707,7 +945,7 @@ final class OverlayController {
         let hidingTransitionID = transitionID
         guard phase != .hidden || panel.isVisible else { return }
 
-        if immediately || shouldReduceMotion() {
+        if immediately {
             rootView?.setInitialState(expanded: false)
             panel.orderOut(nil)
             phase = .hidden
@@ -717,6 +955,23 @@ final class OverlayController {
         guard phase != .launching else { return }
 
         phase = .closing
+        if shouldReduceMotion() {
+            rootView?.animateReducedMotionContent(
+                visible: false,
+                duration: NotchMotion.reducedMotionFadeDuration
+            )
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + NotchMotion.reducedMotionFadeDuration
+            ) { [weak self] in
+                guard let self, self.transitionID == hidingTransitionID else { return }
+                self.panel.orderOut(nil)
+                self.phase = .hidden
+                self.rootView?.setInitialState(expanded: false)
+                self.finishPendingRebuild(expanded: false)
+            }
+            return
+        }
+
         rootView?.animateContentOut(duration: 0.10)
         rootView?.animateExpansion(expanded: false, duration: NotchMotion.closeDuration)
         DispatchQueue.main.asyncAfter(deadline: .now() + NotchMotion.closeDuration) { [weak self] in
@@ -741,21 +996,32 @@ final class OverlayController {
         positionPanel()
         hideTimer?.invalidate()
         panel.alphaValue = 1
+        let reduceMotion = shouldReduceMotion()
+        let shouldAnimateSpatially = duration > 0 && !reduceMotion
+        let shouldFade = duration > 0 && reduceMotion
+        if wasHidden && shouldFade { rootView?.prepareReducedMotionOpen() }
         if wasHidden { panel.orderFrontRegardless() }
 
-        let shouldAnimate = duration > 0 && !shouldReduceMotion()
         phase = .opening
-        if shouldAnimate {
+        if shouldAnimateSpatially {
             rootView?.animateExpansion(expanded: true, duration: duration)
             rootView?.animateContentIn(duration: min(0.16, duration))
+        } else if shouldFade {
+            rootView?.animateReducedMotionContent(
+                visible: true,
+                duration: NotchMotion.reducedMotionFadeDuration
+            )
         } else {
             rootView?.setInitialState(expanded: true)
             phase = .open
             finishPendingRebuild(expanded: true)
         }
 
-        if shouldAnimate {
-            DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
+        if shouldAnimateSpatially || shouldFade {
+            let completionDuration = shouldAnimateSpatially
+                ? duration
+                : NotchMotion.reducedMotionFadeDuration
+            DispatchQueue.main.asyncAfter(deadline: .now() + completionDuration) { [weak self] in
                 guard let self, self.transitionID == presentingTransitionID else { return }
                 self.phase = .open
                 self.finishPendingRebuild(expanded: true)
@@ -764,9 +1030,15 @@ final class OverlayController {
         if autoHide { scheduleHide(after: Self.eventVisibilityDuration) }
     }
 
-    private func openTask(_ task: CompletedTask) {
+    private func openTask(_ task: CompletedTask, animated: Bool = true) {
         guard phase != .launching, onOpen?(task) == true else { return }
-        guard phase != .hidden else {
+        guard animated, phase != .hidden, !shouldReduceMotion() else {
+            transitionID &+= 1
+            hideTimer?.invalidate()
+            isPinned = false
+            if panel.isVisible { panel.orderOut(nil) }
+            phase = .hidden
+            pendingRebuild = false
             onOpenFinished?(task)
             return
         }
@@ -776,13 +1048,6 @@ final class OverlayController {
         hideTimer?.invalidate()
         isPinned = false
         phase = .launching
-
-        if shouldReduceMotion() {
-            panel.orderOut(nil)
-            phase = .hidden
-            onOpenFinished?(task)
-            return
-        }
 
         rootView?.animateLaunch(selectedRow: rowsByEventID[task.eventID])
         rootView?.animateExpansion(expanded: false, duration: NotchMotion.launchDuration)
@@ -833,7 +1098,7 @@ final class OverlayController {
         toggleHint.textColor = NSColor.white.withAlphaComponent(0.52)
         toggleHint.translatesAutoresizingMaskIntoConstraints = false
 
-        let clear = ClosureButton { [weak self] in self?.onClear?() }
+        let clear = ClosureButton { [weak self] in self?.clearTasks() }
         clear.title = "Clear"
         clear.font = .systemFont(ofSize: 11, weight: .medium)
         clear.contentTintColor = NSColor.white.withAlphaComponent(0.66)
@@ -908,8 +1173,11 @@ final class OverlayController {
                 index: index,
                 shouldReduceMotion: shouldReduceMotion,
                 open: { [weak self] in self?.openTask(task) },
-                dismiss: { [weak self] in self?.onDismiss?(index) }
+                dismiss: { [weak self] in self?.dismissTask(at: index) }
             )
+            if dismissingEventIDs.contains(task.eventID) {
+                row.holdInvisibleForPendingDismissal()
+            }
             rows.append(row)
             rowLookup[task.eventID] = row
             stack.addArrangedSubview(row)
@@ -960,6 +1228,10 @@ final class OverlayController {
 
     private func positionPanel() {
         panel.setFrameOrigin(visibleOrigin())
+    }
+
+    private func screenFrame(_ row: TaskRowView) -> NSRect {
+        panel.convertToScreen(row.convert(row.bounds, to: nil))
     }
 
     private func visibleOrigin() -> NSPoint {

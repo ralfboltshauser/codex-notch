@@ -1,5 +1,6 @@
 import AppKit
 import CodexNotchCore
+import QuartzCore
 
 final class SettingsWindow: NSWindow {
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
@@ -34,18 +35,27 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
 
     private let pairings: PairingStore
     private let pairer: RemoteHostPairer
+    private let shouldReduceMotion: () -> Bool
     private let root = NSVisualEffectView()
     private let content = NSView()
     private let hostField = NSTextField()
     private let statusLabel = NSTextField(labelWithString: "")
     private var working = false
+    private var contentTransitionID = 0
 
     var onConnectionsChanged: (() -> Void)?
     var onUninstall: ((@escaping (Result<Void, Error>) -> Void) -> Void)?
 
-    init(pairings: PairingStore, pairer: RemoteHostPairer) {
+    init(
+        pairings: PairingStore,
+        pairer: RemoteHostPairer,
+        shouldReduceMotion: @escaping () -> Bool = {
+            NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        }
+    ) {
         self.pairings = pairings
         self.pairer = pairer
+        self.shouldReduceMotion = shouldReduceMotion
         let window = SettingsWindow(
             contentRect: NSRect(x: 0, y: 0, width: 620, height: 540),
             styleMask: [.titled, .closable, .fullSizeContentView],
@@ -100,6 +110,10 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         content.removeFromSuperview()
         content.subviews.forEach { $0.removeFromSuperview() }
         content.translatesAutoresizingMaskIntoConstraints = false
+        content.wantsLayer = true
+        content.layer?.removeAllAnimations()
+        content.layer?.opacity = 1
+        content.layer?.transform = CATransform3DIdentity
         root.addSubview(content)
         NSLayoutConstraint.activate([
             content.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 46),
@@ -107,6 +121,72 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
             content.topAnchor.constraint(equalTo: root.topAnchor, constant: 48),
             content.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -36),
         ])
+    }
+
+    private func transitionContent(to build: @escaping () -> Void) {
+        guard window?.isVisible == true, let layer = content.layer else {
+            build()
+            return
+        }
+        contentTransitionID &+= 1
+        let transitionID = contentTransitionID
+        let reduceMotion = shouldReduceMotion()
+        animateContent(
+            layer: layer,
+            opacity: 0,
+            transform: reduceMotion
+                ? CATransform3DIdentity
+                : CATransform3DMakeTranslation(-8, 0, 0),
+            duration: 0.10
+        )
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.10) { [weak self] in
+            guard let self, self.contentTransitionID == transitionID else { return }
+            build()
+            self.content.layoutSubtreeIfNeeded()
+            guard let incomingLayer = self.content.layer else { return }
+            let initialTransform = reduceMotion
+                ? CATransform3DIdentity
+                : CATransform3DMakeTranslation(10, 0, 0)
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            incomingLayer.opacity = 0
+            incomingLayer.transform = initialTransform
+            CATransaction.commit()
+            self.animateContent(
+                layer: incomingLayer,
+                opacity: 1,
+                transform: CATransform3DIdentity,
+                duration: reduceMotion ? NotchMotion.reducedMotionFadeDuration : 0.18
+            )
+        }
+    }
+
+    private func animateContent(
+        layer: CALayer,
+        opacity: Float,
+        transform: CATransform3D,
+        duration: TimeInterval
+    ) {
+        let currentOpacity = layer.presentation()?.opacity ?? layer.opacity
+        let currentTransform = layer.presentation()?.transform ?? layer.transform
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.opacity = opacity
+        layer.transform = transform
+        CATransaction.commit()
+
+        layer.removeAnimation(forKey: "settingsContent")
+        let opacityAnimation = CABasicAnimation(keyPath: "opacity")
+        opacityAnimation.fromValue = currentOpacity
+        opacityAnimation.toValue = opacity
+        let transformAnimation = CABasicAnimation(keyPath: "transform")
+        transformAnimation.fromValue = currentTransform
+        transformAnimation.toValue = transform
+        let group = CAAnimationGroup()
+        group.animations = [opacityAnimation, transformAnimation]
+        group.duration = duration
+        group.timingFunction = NotchMotion.easeOut
+        layer.add(group, forKey: "settingsContent")
     }
 
     private func buildLocalSetup() {
@@ -169,7 +249,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
 
         let done = ClosureButton { [weak self] in
             UserDefaults.standard.set(true, forKey: Self.completionKey)
-            self?.buildConnections()
+            self?.transitionContent { self?.buildConnections() }
         }
         done.title = "Hook trusted"
         stylePrimaryButton(done)
@@ -326,8 +406,10 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
                 self.setStatus("Cleanup complete. Closing Codex Notch…", error: false)
             case .failure(let error):
                 self.onConnectionsChanged?()
-                self.buildConnections()
-                self.setStatus(error.localizedDescription, error: true)
+                self.transitionContent {
+                    self.buildConnections()
+                    self.setStatus(error.localizedDescription, error: true)
+                }
             }
         }
     }
@@ -336,7 +418,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         do {
             try CodexHookInstaller().install()
             UserDefaults.standard.set(false, forKey: Self.completionKey)
-            buildTrustStep()
+            transitionContent { [weak self] in self?.buildTrustStep() }
         } catch {
             setStatus(error.localizedDescription, error: true)
         }
@@ -355,7 +437,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
                 DispatchQueue.main.async {
                     self.working = false
                     self.onConnectionsChanged?()
-                    self.buildConnections()
+                    self.transitionContent { [weak self] in self?.buildConnections() }
                     try? self.pairer.openTrustReview(for: host)
                 }
             } catch {
@@ -378,7 +460,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
                 DispatchQueue.main.async {
                     self.working = false
                     self.onConnectionsChanged?()
-                    self.buildConnections()
+                    self.transitionContent { [weak self] in self?.buildConnections() }
                 }
             } catch {
                 DispatchQueue.main.async {
