@@ -535,6 +535,7 @@ final class OverlayController {
     }
 
     private let panel: FocuslessPanel
+    private let shouldReduceMotion: () -> Bool
     private var tasks: [CompletedTask] = []
     private var hideTimer: Timer?
     private var targetScreen: NSScreen?
@@ -572,7 +573,12 @@ final class OverlayController {
     var updateButtonForTesting: NSButton? { updateButton }
     var hasContent: Bool { !tasks.isEmpty || updateVersion != nil }
 
-    init() {
+    init(
+        shouldReduceMotion: @escaping () -> Bool = {
+            NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        }
+    ) {
+        self.shouldReduceMotion = shouldReduceMotion
         panel = FocuslessPanel(
             contentRect: .zero,
             styleMask: [.borderless, .nonactivatingPanel],
@@ -674,7 +680,7 @@ final class OverlayController {
         let hidingTransitionID = transitionID
         guard phase != .hidden || panel.isVisible else { return }
 
-        if immediately || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+        if immediately || shouldReduceMotion() {
             rootView?.setInitialState(expanded: false)
             panel.orderOut(nil)
             phase = .hidden
@@ -710,7 +716,7 @@ final class OverlayController {
         panel.alphaValue = 1
         if wasHidden { panel.orderFrontRegardless() }
 
-        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let reduceMotion = shouldReduceMotion()
         phase = .opening
         if reduceMotion {
             rootView?.setInitialState(expanded: true)
@@ -730,7 +736,7 @@ final class OverlayController {
 
     private func openTask(_ task: CompletedTask) {
         guard phase != .launching, onOpen?(task) == true else { return }
-        guard panel.isVisible, phase != .hidden else {
+        guard phase != .hidden else {
             onOpenFinished?(task)
             return
         }
@@ -741,7 +747,7 @@ final class OverlayController {
         isPinned = false
         phase = .launching
 
-        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+        if shouldReduceMotion() {
             panel.orderOut(nil)
             phase = .hidden
             onOpenFinished?(task)

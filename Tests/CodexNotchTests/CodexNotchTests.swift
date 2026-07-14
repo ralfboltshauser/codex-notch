@@ -165,7 +165,7 @@ final class CodexNotchTests: XCTestCase {
 
     func testVisibleTaskOpenDefersRemovalUntilHandoffCompletes() {
         _ = NSApplication.shared
-        let overlay = OverlayController()
+        let overlay = OverlayController(shouldReduceMotion: { false })
         let task = CompletedTask(
             eventID: String(repeating: "c", count: 64),
             title: "Open with a handoff",
