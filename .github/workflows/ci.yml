@@ -15,7 +15,7 @@ jobs:
         run: |
           for script in *.sh; do sh -n "$script"; done
       - name: Compile Python
-        run: python3 -m py_compile remote/codex_notch_remote.py
+        run: python3 -m py_compile remote/codex_notch_remote.py remote/codex_notch_live.py
 
   macos:
     runs-on: macos-14

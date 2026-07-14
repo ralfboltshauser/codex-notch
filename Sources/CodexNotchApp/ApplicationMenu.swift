@@ -15,6 +15,12 @@ enum ApplicationMenu {
         )
         applicationMenu.addItem(.separator())
         applicationMenu.addItem(
+            withTitle: "Settings…",
+            action: #selector(AppDelegate.openSettings(_:)),
+            keyEquivalent: ","
+        )
+        applicationMenu.addItem(.separator())
+        applicationMenu.addItem(
             withTitle: "Hide \(applicationName)",
             action: #selector(NSApplication.hide(_:)),
             keyEquivalent: "h"

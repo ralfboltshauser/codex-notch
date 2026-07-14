@@ -380,6 +380,40 @@ def hook_state_keys(root, source_path):
     return keys
 
 
+def trusted_hook_state_keys(keys):
+    path = codex_config_file()
+    if not keys or not path.exists():
+        return set()
+    header = re.compile(r'^\[hooks\.state\.("(?:\\.|[^"\\])*")\]\s*$')
+    trusted_hash = re.compile(r'^trusted_hash\s*=\s*"[^"]+"\s*$')
+    current_key = None
+    trusted = set()
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("["):
+            match = header.fullmatch(stripped)
+            current_key = json.loads(match.group(1)) if match else None
+        elif current_key in keys and trusted_hash.fullmatch(stripped):
+            trusted.add(current_key)
+    return trusted
+
+
+def check_health(attempts=1):
+    configuration = load_configuration()
+    root = read_hooks(hooks_file())
+    if not contains_our_handlers(root):
+        raise ValueError("Codex completion hook is not installed")
+    keys = hook_state_keys(root, hooks_file())
+    if trusted_hook_state_keys(keys) != keys:
+        raise ValueError("Codex completion hook still needs trust")
+    live_script = Path(__file__).resolve().with_name("codex_notch_live-v1.py")
+    if not live_script.exists():
+        live_script = Path(__file__).resolve().with_name("codex_notch_live.py")
+    if not live_script.is_file() or not os.access(live_script, os.X_OK):
+        raise ValueError("Codex active-task observer is not installed")
+    ping_receiver(configuration, attempts=attempts)
+
+
 def remove_hook_state(keys):
     path = codex_config_file()
     if not keys or not path.exists():
@@ -446,8 +480,23 @@ Unit=codex-notch-flush.service
 [Install]
 WantedBy=timers.target
 """
+    live_script = script_path.with_name("codex_notch_live-v1.py")
+    live_service = """[Unit]
+Description=Publish active Codex tasks to Codex Notch
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%s
+Restart=always
+RestartSec=2s
+
+[Install]
+WantedBy=default.target
+""" % shlex.quote(str(live_script))
     (directory / "codex-notch-flush.service").write_text(service)
     (directory / "codex-notch-flush.timer").write_text(timer)
+    (directory / "codex-notch-live.service").write_text(live_service)
     try:
         subprocess.run(["systemctl", "--user", "daemon-reload"], check=False, timeout=5)
         subprocess.run(
@@ -455,6 +504,17 @@ WantedBy=timers.target
             check=False,
             timeout=5,
         )
+        if live_script.is_file():
+            subprocess.run(
+                ["systemctl", "--user", "enable", "--now", "codex-notch-live.service"],
+                check=False,
+                timeout=5,
+            )
+            subprocess.run(
+                ["systemctl", "--user", "restart", "codex-notch-live.service"],
+                check=False,
+                timeout=5,
+            )
     except (OSError, subprocess.SubprocessError):
         pass
 
@@ -505,7 +565,15 @@ def uninstall():
         )
     except (OSError, subprocess.SubprocessError):
         pass
-    for name in ("codex-notch-flush.service", "codex-notch-flush.timer"):
+    try:
+        subprocess.run(
+            ["systemctl", "--user", "disable", "--now", "codex-notch-live.service"],
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass
+    for name in ("codex-notch-flush.service", "codex-notch-flush.timer", "codex-notch-live.service"):
         try:
             (systemd / name).unlink()
         except FileNotFoundError:
@@ -521,6 +589,11 @@ def uninstall():
         installed_script.unlink()
     except FileNotFoundError:
         pass
+    installed_live_script = installed_script.with_name("codex_notch_live-v1.py")
+    try:
+        installed_live_script.unlink()
+    except FileNotFoundError:
+        pass
     try:
         installed_script.parent.rmdir()
     except OSError:
@@ -534,6 +607,8 @@ def main(argv=None):
     actions.add_argument("--install-json", action="store_true")
     actions.add_argument("--flush", action="store_true")
     actions.add_argument("--ping", action="store_true")
+    actions.add_argument("--health", action="store_true")
+    actions.add_argument("--repair", action="store_true")
     actions.add_argument("--uninstall", action="store_true")
     parser.add_argument("--ping-attempts", type=int, default=1, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
@@ -555,6 +630,16 @@ def main(argv=None):
         except (OSError, ValueError, ConnectionError) as error:
             print(error, file=sys.stderr)
             return 1
+    if args.health:
+        try:
+            check_health(attempts=args.ping_attempts)
+            return 0
+        except (OSError, ValueError, ConnectionError) as error:
+            print(error, file=sys.stderr)
+            return 1
+    if args.repair:
+        install(load_configuration())
+        return 0
     uninstall()
     return 0
 

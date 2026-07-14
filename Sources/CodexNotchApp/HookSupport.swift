@@ -26,6 +26,28 @@ struct CodexHookInstaller {
         }
     }
 
+    var needsRepair: Bool {
+        guard let root = try? readRoot(),
+              let hooks = root["hooks"] as? [String: Any],
+              let groups = hooks["Stop"] as? [[String: Any]] else { return true }
+        let owned = groups.flatMap { $0["hooks"] as? [[String: Any]] ?? [] }
+            .filter(isOwnedHandler)
+        guard owned.count == 1, let handler = owned.first else { return true }
+        return (handler["command"] as? String) != currentCommand
+            || (handler["timeout"] as? Int) != 5
+            || (handler["statusMessage"] as? String) != "Saving completion to Codex Notch"
+    }
+
+    var hasOwnedInstallation: Bool {
+        guard let root = try? readRoot(),
+              let hooks = root["hooks"] as? [String: Any] else { return false }
+        return hooks.values
+            .compactMap { $0 as? [[String: Any]] }
+            .flatMap { $0 }
+            .flatMap { $0["hooks"] as? [[String: Any]] ?? [] }
+            .contains(where: isOwnedHandler)
+    }
+
     func install() throws {
         guard FileManager.default.isExecutableFile(atPath: executableURL.path) else {
             throw NSError(
@@ -55,7 +77,7 @@ struct CodexHookInstaller {
         cleanedGroups.append([
             "hooks": [[
                 "type": "command",
-                "command": "\(shellQuote(executableURL.path)) \(Self.marker)",
+                "command": currentCommand,
                 "timeout": 5,
                 "statusMessage": "Saving completion to Codex Notch",
             ]],
@@ -162,7 +184,7 @@ struct CodexHookInstaller {
     }
 
     private func isCurrentHandler(_ handler: [String: Any]) -> Bool {
-        (handler["command"] as? String)?.contains(Self.marker) == true
+        (handler["command"] as? String) == currentCommand
     }
 
     private func isOwnedHandler(_ handler: [String: Any]) -> Bool {
@@ -214,6 +236,8 @@ struct CodexHookInstaller {
     private func shellQuote(_ value: String) -> String {
         "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
+
+    private var currentCommand: String { "\(shellQuote(executableURL.path)) \(Self.marker)" }
 }
 
 enum CodexHookTrustLauncher {

@@ -15,10 +15,151 @@ final class SettingsWindow: NSWindow {
     }
 }
 
+final class SettingsNavigationButton: ClosureButton {
+    static let horizontalContentPadding: CGFloat = 12
+
+    override var intrinsicContentSize: NSSize {
+        var size = super.intrinsicContentSize
+        size.width += Self.horizontalContentPadding * 2
+        return size
+    }
+}
+
+final class RemoteConnectionRowView: NSView {
+    private let indicator = NSImageView()
+    private let status = NSTextField(labelWithString: "")
+    private let statusDetail = NSTextField(labelWithString: "")
+
+    init(host: RemoteHost, remove: @escaping () -> Void) {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        layer?.backgroundColor = ThemeStore.shared.activeTheme.quietSurface.cgColor
+        layer?.cornerRadius = 9
+        layer?.cornerCurve = .continuous
+
+        indicator.translatesAutoresizingMaskIntoConstraints = false
+
+        let name = NSTextField(labelWithString: host.label)
+        name.font = .systemFont(ofSize: 13, weight: .semibold)
+        name.textColor = ThemeStore.shared.activeTheme.primaryText
+        name.lineBreakMode = .byTruncatingTail
+
+        let alias = NSTextField(labelWithString: host.sshAlias)
+        alias.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
+        alias.textColor = ThemeStore.shared.activeTheme.tertiaryText
+        alias.lineBreakMode = .byTruncatingTail
+
+        let identity = NSStackView(views: [name, alias])
+        identity.orientation = .vertical
+        identity.alignment = .leading
+        identity.spacing = 2
+        identity.translatesAutoresizingMaskIntoConstraints = false
+        identity.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        status.font = .systemFont(ofSize: 11, weight: .semibold)
+        status.alignment = .right
+        status.lineBreakMode = .byTruncatingTail
+        statusDetail.font = .systemFont(ofSize: 10, weight: .regular)
+        statusDetail.textColor = ThemeStore.shared.activeTheme.tertiaryText
+        statusDetail.alignment = .right
+        statusDetail.lineBreakMode = .byTruncatingMiddle
+        let health = NSStackView(views: [status, statusDetail])
+        health.orientation = .vertical
+        health.alignment = .trailing
+        health.spacing = 2
+        health.translatesAutoresizingMaskIntoConstraints = false
+        health.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+
+        let removeButton = ClosureButton(handler: remove)
+        removeButton.image = NSImage(
+            systemSymbolName: "xmark",
+            accessibilityDescription: "Remove \(host.label)"
+        )
+        removeButton.contentTintColor = ThemeStore.shared.activeTheme.secondaryText
+        removeButton.toolTip = "Remove \(host.label)"
+        removeButton.translatesAutoresizingMaskIntoConstraints = false
+
+        [indicator, identity, health, removeButton].forEach(addSubview)
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 56),
+            indicator.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 11),
+            indicator.centerYAnchor.constraint(equalTo: centerYAnchor),
+            indicator.widthAnchor.constraint(equalToConstant: 18),
+            indicator.heightAnchor.constraint(equalToConstant: 18),
+            identity.leadingAnchor.constraint(equalTo: indicator.trailingAnchor, constant: 10),
+            identity.centerYAnchor.constraint(equalTo: centerYAnchor),
+            identity.widthAnchor.constraint(greaterThanOrEqualToConstant: 110),
+            health.leadingAnchor.constraint(greaterThanOrEqualTo: identity.trailingAnchor, constant: 12),
+            health.centerYAnchor.constraint(equalTo: centerYAnchor),
+            health.widthAnchor.constraint(lessThanOrEqualToConstant: 230),
+            removeButton.leadingAnchor.constraint(equalTo: health.trailingAnchor, constant: 8),
+            removeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            removeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            removeButton.widthAnchor.constraint(equalToConstant: 28),
+            removeButton.heightAnchor.constraint(equalToConstant: 28),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func update(health: RemoteHostHealth, refreshing: Bool) {
+        let symbol: String
+        let color: NSColor
+        switch health {
+        case .checking:
+            symbol = "ellipsis.circle.fill"
+            color = ThemeStore.shared.activeTheme.tertiaryText
+        case .working:
+            symbol = "checkmark.circle.fill"
+            color = NSColor(calibratedRed: 0.40, green: 0.91, blue: 0.71, alpha: 1)
+        case .unreachable:
+            symbol = "wifi.slash"
+            color = .systemRed
+        case .needsAttention:
+            symbol = "exclamationmark.triangle.fill"
+            color = .systemOrange
+        }
+        indicator.image = NSImage(
+            systemSymbolName: symbol,
+            accessibilityDescription: health.statusText
+        )
+        indicator.contentTintColor = color
+        status.stringValue = health.statusText
+        status.textColor = color
+
+        if refreshing, health.checkedAt != nil {
+            statusDetail.stringValue = "Rechecking…"
+        } else if let detail = health.detailText {
+            statusDetail.stringValue = detail
+        } else if health.checkedAt != nil {
+            statusDetail.stringValue = "Checked just now"
+        } else {
+            statusDetail.stringValue = "End-to-end test"
+        }
+        statusDetail.toolTip = health.detailText
+        toolTip = health.detailText
+        setAccessibilityLabel("\(health.statusText). \(statusDetail.stringValue)")
+    }
+}
+
+final class FlippedHostStackView: NSStackView {
+    override var isFlipped: Bool { true }
+
+    init(arrangedViews: [NSView]) {
+        super.init(frame: .zero)
+        arrangedViews.forEach(addArrangedSubview)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+}
+
 final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate, NSWindowDelegate {
     static let completionKey = "onboardingComplete.v2"
 
     private enum SettingsPage {
+        case appearance
+        case tasks
         case sounds
         case connections
     }
@@ -43,20 +184,35 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
     private let notificationSounds: NotificationSoundPlayer
     private let isHookInstalled: () -> Bool
     private let shouldReduceMotion: () -> Bool
-    private let root = NSVisualEffectView()
+    private let root = ThemeBackdropView()
     private let content = NSView()
     private let hostField = NSTextField()
     private let statusLabel = NSTextField(labelWithString: "")
+    private var remoteHealth = RemoteHostHealthSnapshot.empty
+    private var remoteRows: [String: RemoteConnectionRowView] = [:]
+    private weak var remoteSummaryLabel: NSTextField?
+    private weak var remoteRefreshButton: ClosureButton?
     private weak var checkForUpdatesButton: ClosureButton?
     private var working = false
     private var contentTransitionID = 0
-    private var selectedPage: SettingsPage = .connections
+    private var selectedPage: SettingsPage = .appearance
+    private var themeCards: [ThemeCardButton] = []
+    private var soundCards: [NotificationSoundCardButton] = []
+    private var settingsTabs: [SettingsNavigationButton] = []
 
     var onConnectionsChanged: (() -> Void)?
+    var onRefreshConnections: (() -> Void)?
     var onCheckForUpdates: (() -> Void)?
     var onUninstall: ((@escaping (Result<Void, Error>) -> Void) -> Void)?
 
     var checkForUpdatesButtonForTesting: NSButton? { checkForUpdatesButton }
+    var settingsTabTitlesForTesting: [String] { settingsTabs.map(\.title) }
+    var renderedThemeChoiceCountForTesting: Int { themeCards.count }
+    var renderedSoundChoiceCountForTesting: Int { soundCards.count }
+
+    func showSoundsForTesting() {
+        buildSettingsPage(.sounds)
+    }
 
     init(
         pairings: PairingStore,
@@ -73,7 +229,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         self.isHookInstalled = isHookInstalled
         self.shouldReduceMotion = shouldReduceMotion
         let window = SettingsWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 680, height: 620),
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 650),
             styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -88,11 +244,6 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         super.init(window: window)
         window.delegate = self
 
-        root.material = .hudWindow
-        root.blendingMode = .behindWindow
-        root.state = .active
-        root.wantsLayer = true
-        root.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.28).cgColor
         window.contentView = root
         showAppropriateStep()
     }
@@ -100,6 +251,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     func windowWillClose(_ notification: Notification) {
+        ThemeStore.shared.endPreview()
         NSApp.setActivationPolicy(.accessory)
         NSApp.deactivate()
     }
@@ -114,77 +266,32 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         window?.makeKeyAndOrderFront(nil)
     }
 
+    func updateRemoteHealth(_ snapshot: RemoteHostHealthSnapshot) {
+        remoteHealth = snapshot
+        remoteSummaryLabel?.stringValue = snapshot.hosts.isEmpty
+            ? "NONE CONFIGURED"
+            : snapshot.summaryText.uppercased()
+        remoteSummaryLabel?.textColor = snapshot.problemCount > 0
+            ? .systemOrange
+            : ThemeStore.shared.activeTheme.tertiaryText
+        remoteRefreshButton?.isEnabled = !snapshot.isRefreshing && !snapshot.hosts.isEmpty
+        remoteRefreshButton?.toolTip = snapshot.isRefreshing
+            ? "Checking remote hosts…"
+            : "Check remote hosts now"
+        for host in snapshot.hosts {
+            remoteRows[host.id]?.update(
+                health: snapshot.health(for: host),
+                refreshing: snapshot.isRefreshing
+            )
+        }
+    }
+
     private func showAppropriateStep() {
         if isHookInstalled() {
             buildSettingsPage(selectedPage)
         } else {
             buildLocalSetup()
         }
-    }
-
-    private func buildSettingsPage(_ page: SettingsPage) {
-        selectedPage = page
-        switch page {
-        case .sounds: buildSounds()
-        case .connections: buildConnections()
-        }
-    }
-
-    private func settingsHeader(selected: SettingsPage) -> NSView {
-        let mark = NSImageView(image: NSImage(
-            systemSymbolName: "sparkles.rectangle.stack.fill",
-            accessibilityDescription: nil
-        ) ?? NSImage())
-        mark.contentTintColor = NSColor(
-            calibratedRed: 0.40,
-            green: 0.91,
-            blue: 0.71,
-            alpha: 1
-        )
-        mark.translatesAutoresizingMaskIntoConstraints = false
-        let product = makeLabel("Codex Notch", size: 14, weight: .semibold, color: .white)
-        let sounds = settingsNavigationButton(
-            title: "Sounds",
-            symbol: "waveform",
-            active: selected == .sounds
-        ) { [weak self] in self?.transitionContent { self?.buildSettingsPage(.sounds) } }
-        let connections = settingsNavigationButton(
-            title: "Connections",
-            symbol: "point.3.connected.trianglepath.dotted",
-            active: selected == .connections
-        ) { [weak self] in self?.transitionContent { self?.buildSettingsPage(.connections) } }
-        let header = NSStackView(views: [mark, product, NSView(), sounds, connections])
-        header.orientation = .horizontal
-        header.alignment = .centerY
-        header.spacing = 8
-        NSLayoutConstraint.activate([
-            header.heightAnchor.constraint(equalToConstant: 30),
-            mark.widthAnchor.constraint(equalToConstant: 19),
-            mark.heightAnchor.constraint(equalToConstant: 19),
-            sounds.widthAnchor.constraint(equalToConstant: 96),
-            sounds.heightAnchor.constraint(equalToConstant: 30),
-            connections.widthAnchor.constraint(equalToConstant: 124),
-            connections.heightAnchor.constraint(equalToConstant: 30),
-        ])
-        return header
-    }
-
-    private func settingsNavigationButton(
-        title: String,
-        symbol: String,
-        active: Bool,
-        action: @escaping () -> Void
-    ) -> ClosureButton {
-        let button = ClosureButton(handler: action)
-        button.title = title
-        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
-        button.imagePosition = .imageLeading
-        button.font = .systemFont(ofSize: 11.5, weight: active ? .semibold : .medium)
-        button.contentTintColor = NSColor.white.withAlphaComponent(active ? 0.92 : 0.52)
-        button.layer?.backgroundColor = NSColor.white.withAlphaComponent(active ? 0.10 : 0).cgColor
-        button.layer?.cornerRadius = 8
-        button.translatesAutoresizingMaskIntoConstraints = false
-        return button
     }
 
     private func resetContent() {
@@ -197,11 +304,447 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         content.layer?.transform = CATransform3DIdentity
         root.addSubview(content)
         NSLayoutConstraint.activate([
-            content.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 46),
-            content.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -46),
-            content.topAnchor.constraint(equalTo: root.topAnchor, constant: 48),
-            content.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -36),
+            content.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 42),
+            content.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -42),
+            content.topAnchor.constraint(equalTo: root.topAnchor, constant: 40),
+            content.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -32),
         ])
+    }
+
+    private func buildSettingsPage(_ page: SettingsPage) {
+        selectedPage = page
+        ThemeStore.shared.endPreview()
+        switch page {
+        case .appearance: buildAppearance()
+        case .tasks: buildTasks()
+        case .sounds: buildSounds()
+        case .connections: buildConnections()
+        }
+    }
+
+    private func buildTasks() {
+        resetContent()
+        let theme = ThemeStore.shared.activeTheme
+        let preferences = ActiveTaskPreferences.shared
+        let header = settingsHeader(selected: .tasks)
+        let title = makeLabel("Tasks in motion", size: 25, weight: .semibold, color: theme.primaryText)
+        let subtitle = makeLabel(
+            "See work while Codex is running, waiting for approval, or waiting for you.",
+            size: 13,
+            weight: .regular,
+            color: theme.secondaryText
+        )
+        let card = NSView()
+        card.translatesAutoresizingMaskIntoConstraints = false
+        card.wantsLayer = true
+        card.layer?.backgroundColor = theme.quietSurface.cgColor
+        card.layer?.borderColor = theme.border.cgColor
+        card.layer?.borderWidth = 1
+        card.layer?.cornerRadius = 14
+        card.layer?.cornerCurve = .continuous
+        let icon = NSImageView(image: NSImage(
+            systemSymbolName: "bolt.horizontal.circle.fill",
+            accessibilityDescription: "Active tasks"
+        ) ?? NSImage())
+        icon.contentTintColor = theme.accent
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        let label = makeLabel("Show active tasks", size: 14, weight: .semibold, color: theme.primaryText)
+        let detail = makeLabel(
+            "Live state is kept in memory only. Prompts, output, paths, and transcripts are never sent to the notch.",
+            size: 11.5,
+            weight: .regular,
+            color: theme.secondaryText
+        )
+        detail.maximumNumberOfLines = 2
+        let toggle = ClosureButton { [weak self] in
+            _ = ActiveTaskPreferences.shared.toggle()
+            self?.buildTasks()
+        }
+        toggle.title = preferences.isVisible ? "On" : "Off"
+        toggle.image = NSImage(
+            systemSymbolName: preferences.isVisible ? "checkmark.circle.fill" : "circle",
+            accessibilityDescription: preferences.isVisible ? "Active tasks shown" : "Active tasks hidden"
+        )
+        toggle.imagePosition = .imageLeading
+        toggle.font = .systemFont(ofSize: 12, weight: .semibold)
+        toggle.contentTintColor = preferences.isVisible ? theme.accent : theme.secondaryText
+        toggle.toolTip = "Toggle active tasks"
+        toggle.translatesAutoresizingMaskIntoConstraints = false
+        [icon, label, detail, toggle].forEach(card.addSubview)
+        NSLayoutConstraint.activate([
+            card.heightAnchor.constraint(equalToConstant: 104),
+            icon.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 18),
+            icon.topAnchor.constraint(equalTo: card.topAnchor, constant: 19),
+            icon.widthAnchor.constraint(equalToConstant: 22),
+            icon.heightAnchor.constraint(equalToConstant: 22),
+            label.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 12),
+            label.topAnchor.constraint(equalTo: card.topAnchor, constant: 18),
+            toggle.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -18),
+            toggle.centerYAnchor.constraint(equalTo: label.centerYAnchor),
+            toggle.widthAnchor.constraint(equalToConstant: 68),
+            toggle.heightAnchor.constraint(equalToConstant: 30),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: toggle.leadingAnchor, constant: -12),
+            detail.leadingAnchor.constraint(equalTo: label.leadingAnchor),
+            detail.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -18),
+            detail.topAnchor.constraint(equalTo: label.bottomAnchor, constant: 8),
+        ])
+
+        let shortcutTitle = makeLabel("QUICK TOGGLE", size: 10, weight: .bold, color: theme.tertiaryText)
+        let shortcutCard = NSView()
+        shortcutCard.translatesAutoresizingMaskIntoConstraints = false
+        shortcutCard.wantsLayer = true
+        shortcutCard.layer?.backgroundColor = theme.surface.cgColor
+        shortcutCard.layer?.cornerRadius = 12
+        shortcutCard.layer?.cornerCurve = .continuous
+        let shortcutDetail = makeLabel("Show or hide active tasks from anywhere", size: 13, weight: .medium, color: theme.primaryText)
+        let keys = makeLabel(GlobalHotKeys.activeTasksShortcutLabel(), size: 12, weight: .semibold, color: theme.accent)
+        keys.font = .monospacedSystemFont(ofSize: 12, weight: .semibold)
+        [shortcutDetail, keys].forEach(shortcutCard.addSubview)
+        NSLayoutConstraint.activate([
+            shortcutCard.heightAnchor.constraint(equalToConstant: 58),
+            shortcutDetail.leadingAnchor.constraint(equalTo: shortcutCard.leadingAnchor, constant: 16),
+            shortcutDetail.centerYAnchor.constraint(equalTo: shortcutCard.centerYAnchor),
+            keys.trailingAnchor.constraint(equalTo: shortcutCard.trailingAnchor, constant: -16),
+            keys.centerYAnchor.constraint(equalTo: shortcutCard.centerYAnchor),
+        ])
+        let note = makeLabel(
+            "Active tasks never open the notch by themselves. Finished tasks keep their existing sound and auto-open behavior.",
+            size: 11.5,
+            weight: .regular,
+            color: theme.secondaryText
+        )
+        note.maximumNumberOfLines = 2
+        let done = ClosureButton { [weak self] in self?.close() }
+        done.title = "Done"
+        styleSecondaryButton(done)
+        let checkForUpdates = makeCheckForUpdatesButton()
+        let footer = NSStackView(views: [makeVersionLabel(), checkForUpdates, NSView(), done])
+        footer.orientation = .horizontal
+        footer.alignment = .centerY
+        footer.spacing = 12
+        let stack = NSStackView(views: [header, title, subtitle, card, shortcutTitle, shortcutCard, note, footer])
+        configureStack(stack)
+        stack.spacing = 0
+        stack.setCustomSpacing(28, after: header)
+        stack.setCustomSpacing(7, after: title)
+        stack.setCustomSpacing(28, after: subtitle)
+        stack.setCustomSpacing(26, after: card)
+        stack.setCustomSpacing(9, after: shortcutTitle)
+        stack.setCustomSpacing(20, after: shortcutCard)
+        stack.setCustomSpacing(30, after: note)
+        content.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: content.topAnchor),
+            header.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            card.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            shortcutCard.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            footer.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            checkForUpdates.widthAnchor.constraint(equalToConstant: 148),
+            checkForUpdates.heightAnchor.constraint(equalToConstant: 40),
+            done.widthAnchor.constraint(equalToConstant: 96),
+            done.heightAnchor.constraint(equalToConstant: 40),
+        ])
+    }
+
+    private func buildAppearance() {
+        resetContent()
+        themeCards.removeAll()
+        let theme = ThemeStore.shared.activeTheme
+        let header = settingsHeader(selected: .appearance)
+        let title = makeLabel("Make it yours", size: 25, weight: .semibold, color: theme.primaryText)
+        let subtitle = makeLabel(
+            "A theme changes the notch, its feedback, and this space together.",
+            size: 13,
+            weight: .regular,
+            color: theme.secondaryText
+        )
+        let preview = NotchThemePreviewView()
+
+        let sectionTitle = makeLabel(
+            "THEMES",
+            size: 10,
+            weight: .bold,
+            color: theme.tertiaryText
+        )
+        let hint = makeLabel(
+            "Hover to try one live · Click to keep it",
+            size: 11,
+            weight: .medium,
+            color: theme.secondaryText
+        )
+        let sectionHeader = NSStackView(views: [sectionTitle, NSView(), hint])
+        sectionHeader.orientation = .horizontal
+        sectionHeader.alignment = .centerY
+
+        let cards = NotchTheme.all.map { palette -> ThemeCardButton in
+            let card = ThemeCardButton(theme: palette)
+            card.translatesAutoresizingMaskIntoConstraints = false
+            card.setSelected(palette.id == ThemeStore.shared.selectedID)
+            card.onSelect = { [weak self] id in
+                ThemeStore.shared.select(id)
+                self?.themeCards.forEach {
+                    $0.setSelected($0.theme.id == ThemeStore.shared.selectedID)
+                }
+            }
+            themeCards.append(card)
+            return card
+        }
+        let firstRow = themeCardRow(Array(cards[0..<3]))
+        let secondRow = themeCardRow(Array(cards[3..<6]))
+        let grid = NSStackView(views: [firstRow, secondRow])
+        grid.orientation = .vertical
+        grid.spacing = 10
+        grid.distribution = .fillEqually
+
+        let done = ClosureButton { [weak self] in self?.close() }
+        done.title = "Done"
+        styleSecondaryButton(done)
+        let checkForUpdates = makeCheckForUpdatesButton()
+        let footer = NSStackView(views: [makeVersionLabel(), checkForUpdates, NSView(), done])
+        footer.orientation = .horizontal
+        footer.alignment = .centerY
+        footer.spacing = 12
+
+        let stack = NSStackView(views: [header, title, subtitle, preview, sectionHeader, grid, footer])
+        configureStack(stack)
+        stack.spacing = 0
+        stack.setCustomSpacing(28, after: header)
+        stack.setCustomSpacing(7, after: title)
+        stack.setCustomSpacing(20, after: subtitle)
+        stack.setCustomSpacing(20, after: preview)
+        stack.setCustomSpacing(9, after: sectionHeader)
+        stack.setCustomSpacing(18, after: grid)
+        content.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: content.topAnchor),
+            header.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            preview.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            preview.heightAnchor.constraint(equalToConstant: 142),
+            sectionHeader.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            grid.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            grid.heightAnchor.constraint(equalToConstant: 196),
+            footer.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            checkForUpdates.widthAnchor.constraint(equalToConstant: 148),
+            checkForUpdates.heightAnchor.constraint(equalToConstant: 40),
+            done.widthAnchor.constraint(equalToConstant: 96),
+            done.heightAnchor.constraint(equalToConstant: 40),
+        ])
+    }
+
+    private func buildSounds() {
+        resetContent()
+        soundCards.removeAll()
+        let theme = ThemeStore.shared.activeTheme
+        let selected = notificationSounds.selectedSound
+        let header = settingsHeader(selected: .sounds)
+        let title = makeLabel("A finish worth hearing", size: 25, weight: .semibold, color: theme.primaryText)
+        let subtitle = makeLabel(
+            "Six short completion tones, designed to stay satisfying even on a busy day.",
+            size: 13,
+            weight: .regular,
+            color: theme.secondaryText
+        )
+        let sectionTitle = makeLabel(
+            "COMPLETION TONE",
+            size: 10,
+            weight: .bold,
+            color: theme.tertiaryText
+        )
+        let hint = makeLabel(
+            "Click any sound to preview it",
+            size: 11,
+            weight: .medium,
+            color: theme.secondaryText
+        )
+        let sectionHeader = NSStackView(views: [sectionTitle, NSView(), hint])
+        sectionHeader.orientation = .horizontal
+        sectionHeader.alignment = .centerY
+
+        let audibleCards = NotificationSound.allCases
+            .filter { $0 != .none }
+            .map { sound -> NotificationSoundCardButton in
+                let card = NotificationSoundCardButton(sound: sound, theme: theme)
+                card.translatesAutoresizingMaskIntoConstraints = false
+                card.setSelected(sound == selected)
+                card.onSelect = { [weak self] sound in
+                    self?.notificationSounds.selectAndPreview(sound)
+                    self?.buildSounds()
+                }
+                return card
+            }
+        let firstRow = soundCardRow(Array(audibleCards[0..<3]))
+        let secondRow = soundCardRow(Array(audibleCards[3..<6]))
+        let grid = NSStackView(views: [firstRow, secondRow])
+        grid.orientation = .vertical
+        grid.spacing = 10
+        grid.distribution = .fillEqually
+
+        let silent = NotificationSoundCardButton(sound: .none, theme: theme)
+        silent.translatesAutoresizingMaskIntoConstraints = false
+        silent.setSelected(selected == .none)
+        silent.onSelect = { [weak self] sound in
+            self?.notificationSounds.selectAndPreview(sound)
+            self?.buildSounds()
+        }
+        soundCards = audibleCards + [silent]
+
+        let contextIcon = NSImageView(image: NSImage(
+            systemSymbolName: "bell.badge.fill",
+            accessibilityDescription: nil
+        ) ?? NSImage())
+        contextIcon.contentTintColor = theme.accent
+        contextIcon.translatesAutoresizingMaskIntoConstraints = false
+        let context = makeLabel(
+            "Sounds play only for newly accepted local or remote Stop-hook events. Opening the notch yourself stays quiet.",
+            size: 11.5,
+            weight: .regular,
+            color: theme.secondaryText
+        )
+        context.maximumNumberOfLines = 2
+        let contextRow = NSStackView(views: [contextIcon, context])
+        contextRow.orientation = .horizontal
+        contextRow.alignment = .centerY
+        contextRow.spacing = 10
+        contextRow.edgeInsets = NSEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
+        contextRow.wantsLayer = true
+        contextRow.layer?.backgroundColor = theme.quietSurface.cgColor
+        contextRow.layer?.cornerRadius = 10
+        contextRow.layer?.cornerCurve = .continuous
+
+        let done = ClosureButton { [weak self] in self?.close() }
+        done.title = "Done"
+        styleSecondaryButton(done)
+        let checkForUpdates = makeCheckForUpdatesButton()
+        let footer = NSStackView(views: [makeVersionLabel(), checkForUpdates, NSView(), done])
+        footer.orientation = .horizontal
+        footer.alignment = .centerY
+        footer.spacing = 12
+
+        let stack = NSStackView(
+            views: [header, title, subtitle, sectionHeader, grid, silent, contextRow, footer]
+        )
+        configureStack(stack)
+        stack.spacing = 0
+        stack.setCustomSpacing(28, after: header)
+        stack.setCustomSpacing(7, after: title)
+        stack.setCustomSpacing(27, after: subtitle)
+        stack.setCustomSpacing(9, after: sectionHeader)
+        stack.setCustomSpacing(10, after: grid)
+        stack.setCustomSpacing(18, after: silent)
+        stack.setCustomSpacing(20, after: contextRow)
+        content.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: content.topAnchor),
+            header.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            sectionHeader.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            grid.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            grid.heightAnchor.constraint(equalToConstant: 154),
+            silent.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            silent.heightAnchor.constraint(equalToConstant: 58),
+            contextRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            contextIcon.widthAnchor.constraint(equalToConstant: 18),
+            contextIcon.heightAnchor.constraint(equalToConstant: 18),
+            footer.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            checkForUpdates.widthAnchor.constraint(equalToConstant: 148),
+            checkForUpdates.heightAnchor.constraint(equalToConstant: 40),
+            done.widthAnchor.constraint(equalToConstant: 96),
+            done.heightAnchor.constraint(equalToConstant: 40),
+        ])
+    }
+
+    private func soundCardRow(_ cards: [NotificationSoundCardButton]) -> NSStackView {
+        let row = NSStackView(views: cards)
+        row.orientation = .horizontal
+        row.spacing = 10
+        row.distribution = .fillEqually
+        return row
+    }
+
+    private func themeCardRow(_ cards: [ThemeCardButton]) -> NSStackView {
+        let row = NSStackView(views: cards)
+        row.orientation = .horizontal
+        row.spacing = 10
+        row.distribution = .fillEqually
+        return row
+    }
+
+    private func settingsHeader(selected: SettingsPage) -> NSView {
+        let theme = ThemeStore.shared.activeTheme
+        let mark = NSImageView(image: NSImage(
+            systemSymbolName: "sparkles.rectangle.stack.fill",
+            accessibilityDescription: nil
+        ) ?? NSImage())
+        mark.contentTintColor = theme.accent
+        mark.translatesAutoresizingMaskIntoConstraints = false
+        let product = makeLabel("Codex Notch", size: 14, weight: .semibold, color: theme.primaryText)
+        let spacer = NSView()
+
+        let appearance = settingsNavigationButton(
+            title: "Themes",
+            symbol: "paintpalette.fill",
+            active: selected == .appearance
+        ) { [weak self] in self?.transitionContent { self?.buildSettingsPage(.appearance) } }
+        let sounds = settingsNavigationButton(
+            title: "Sounds",
+            symbol: "waveform",
+            active: selected == .sounds
+        ) { [weak self] in self?.transitionContent { self?.buildSettingsPage(.sounds) } }
+        let tasks = settingsNavigationButton(
+            title: "Tasks",
+            symbol: "bolt.fill",
+            active: selected == .tasks
+        ) { [weak self] in self?.transitionContent { self?.buildSettingsPage(.tasks) } }
+        let connections = settingsNavigationButton(
+            title: "Connections",
+            symbol: "point.3.connected.trianglepath.dotted",
+            active: selected == .connections
+        ) { [weak self] in self?.transitionContent { self?.buildSettingsPage(.connections) } }
+        let navigation = NSStackView(views: [appearance, tasks, sounds, connections])
+        navigation.orientation = .horizontal
+        navigation.spacing = 6
+        navigation.alignment = .centerY
+        settingsTabs = [appearance, tasks, sounds, connections]
+
+        let header = NSStackView(views: [mark, product, spacer, navigation])
+        header.orientation = .horizontal
+        header.alignment = .centerY
+        header.spacing = 9
+        NSLayoutConstraint.activate([
+            header.heightAnchor.constraint(equalToConstant: 32),
+            mark.widthAnchor.constraint(equalToConstant: 19),
+            mark.heightAnchor.constraint(equalToConstant: 19),
+            appearance.heightAnchor.constraint(equalToConstant: 30),
+            tasks.heightAnchor.constraint(equalToConstant: 30),
+            sounds.heightAnchor.constraint(equalToConstant: 30),
+            connections.heightAnchor.constraint(equalToConstant: 30),
+        ])
+        return header
+    }
+
+    private func settingsNavigationButton(
+        title: String,
+        symbol: String,
+        active: Bool,
+        action: @escaping () -> Void
+    ) -> SettingsNavigationButton {
+        let theme = ThemeStore.shared.activeTheme
+        let button = SettingsNavigationButton(handler: action)
+        button.title = title
+        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        button.imagePosition = .imageLeading
+        button.imageHugsTitle = true
+        button.font = .systemFont(ofSize: 11.5, weight: active ? .semibold : .medium)
+        button.contentTintColor = active ? theme.primaryText : theme.secondaryText
+        button.layer?.backgroundColor = (active ? theme.hoverSurface : NSColor.clear).cgColor
+        button.layer?.cornerRadius = 9
+        button.translatesAutoresizingMaskIntoConstraints = false
+        return button
     }
 
     private func transitionContent(to build: @escaping () -> Void) {
@@ -330,7 +873,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
 
         let done = ClosureButton { [weak self] in
             UserDefaults.standard.set(true, forKey: Self.completionKey)
-            self?.transitionContent { self?.buildSettingsPage(.connections) }
+            self?.transitionContent { self?.buildSettingsPage(.appearance) }
         }
         done.title = "Hook trusted"
         stylePrimaryButton(done)
@@ -361,123 +904,16 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         ])
     }
 
-    private func buildSounds() {
-        resetContent()
-        let selected = notificationSounds.selectedSound
-        let header = settingsHeader(selected: .sounds)
-        let title = makeLabel("A finish worth hearing", size: 25, weight: .semibold, color: .white)
-        let subtitle = makeLabel(
-            "Six short completion tones, designed to stay satisfying even on a busy day.",
-            size: 13,
-            weight: .regular,
-            color: NSColor.white.withAlphaComponent(0.52)
-        )
-        let sectionTitle = makeLabel(
-            "COMPLETION TONE",
-            size: 10,
-            weight: .bold,
-            color: NSColor.white.withAlphaComponent(0.42)
-        )
-        let hint = makeLabel(
-            "Click any sound to preview it",
-            size: 11,
-            weight: .medium,
-            color: NSColor.white.withAlphaComponent(0.48)
-        )
-        let sectionHeader = NSStackView(views: [sectionTitle, NSView(), hint])
-        sectionHeader.orientation = .horizontal
-        sectionHeader.alignment = .centerY
-
-        let soundCards = NotificationSound.allCases
-            .filter { $0 != .none }
-            .map { sound -> NotificationSoundCardButton in
-                let card = NotificationSoundCardButton(sound: sound)
-                card.translatesAutoresizingMaskIntoConstraints = false
-                card.setSelected(sound == selected)
-                card.onSelect = { [weak self] sound in
-                    self?.notificationSounds.selectAndPreview(sound)
-                    self?.buildSounds()
-                }
-                return card
-            }
-        let rows = stride(from: 0, to: soundCards.count, by: 2).map { index -> NSStackView in
-            let row = NSStackView(views: [soundCards[index], soundCards[index + 1]])
-            row.orientation = .horizontal
-            row.spacing = 10
-            row.distribution = .fillEqually
-            return row
-        }
-        let grid = NSStackView(views: rows)
-        grid.orientation = .vertical
-        grid.spacing = 9
-        grid.distribution = .fillEqually
-
-        let silent = NotificationSoundCardButton(sound: .none)
-        silent.translatesAutoresizingMaskIntoConstraints = false
-        silent.setSelected(selected == .none)
-        silent.onSelect = { [weak self] sound in
-            self?.notificationSounds.selectAndPreview(sound)
-            self?.buildSounds()
-        }
-
-        let context = makeLabel(
-            "Plays only for newly accepted local or remote Stop-hook events. Opening the notch yourself stays quiet.",
-            size: 11.5,
-            weight: .regular,
-            color: NSColor.white.withAlphaComponent(0.42)
-        )
-        context.maximumNumberOfLines = 2
-
-        let done = ClosureButton { [weak self] in self?.close() }
-        done.title = "Done"
-        styleSecondaryButton(done)
-        let checkForUpdates = makeCheckForUpdatesButton()
-        let footer = NSStackView(views: [makeVersionLabel(), checkForUpdates, NSView(), done])
-        footer.orientation = .horizontal
-        footer.alignment = .centerY
-        footer.spacing = 12
-
-        let stack = NSStackView(
-            views: [header, title, subtitle, sectionHeader, grid, silent, context, footer]
-        )
-        configureStack(stack)
-        stack.spacing = 0
-        stack.setCustomSpacing(24, after: header)
-        stack.setCustomSpacing(7, after: title)
-        stack.setCustomSpacing(24, after: subtitle)
-        stack.setCustomSpacing(8, after: sectionHeader)
-        stack.setCustomSpacing(10, after: grid)
-        stack.setCustomSpacing(16, after: silent)
-        stack.setCustomSpacing(20, after: context)
-        content.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            stack.topAnchor.constraint(equalTo: content.topAnchor),
-            header.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            sectionHeader.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            grid.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            grid.heightAnchor.constraint(equalToConstant: 210),
-            silent.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            silent.heightAnchor.constraint(equalToConstant: 54),
-            context.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            footer.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            checkForUpdates.widthAnchor.constraint(equalToConstant: 148),
-            checkForUpdates.heightAnchor.constraint(equalToConstant: 40),
-            done.widthAnchor.constraint(equalToConstant: 96),
-            done.heightAnchor.constraint(equalToConstant: 40),
-        ])
-    }
-
     private func buildConnections() {
         resetContent()
+        let theme = ThemeStore.shared.activeTheme
         let header = settingsHeader(selected: .connections)
-        let title = makeLabel("Connections", size: 25, weight: .semibold, color: .white)
+        let title = makeLabel("Connections", size: 25, weight: .semibold, color: theme.primaryText)
         let subtitle = makeLabel(
             "Choose where completed Codex tasks can reach this Mac.",
             size: 13,
             weight: .regular,
-            color: NSColor.white.withAlphaComponent(0.52)
+            color: theme.secondaryText
         )
         let local = connectionRow(label: "This Mac", detail: "Local hook", removable: nil)
 
@@ -485,22 +921,81 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
             "REMOTE UBUNTU HOSTS",
             size: 10,
             weight: .bold,
-            color: NSColor.white.withAlphaComponent(0.42)
+            color: theme.tertiaryText
         )
-        let hosts = pairings.hosts.map { host in
-            connectionRow(label: host.label, detail: host.sshAlias) { [weak self] in
+        let remoteSummary = makeLabel(
+            "",
+            size: 9.5,
+            weight: .semibold,
+            color: theme.tertiaryText
+        )
+        remoteSummary.alignment = .right
+        remoteSummary.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        remoteSummaryLabel = remoteSummary
+        let refresh = ClosureButton { [weak self] in self?.onRefreshConnections?() }
+        refresh.image = NSImage(
+            systemSymbolName: "arrow.clockwise",
+            accessibilityDescription: "Refresh remote host status"
+        )
+        refresh.contentTintColor = theme.secondaryText
+        refresh.toolTip = "Check remote hosts now"
+        refresh.translatesAutoresizingMaskIntoConstraints = false
+        remoteRefreshButton = refresh
+        let remoteHeader = NSStackView(
+            views: [remoteTitle, NSView(), remoteSummary, refresh]
+        )
+        remoteHeader.orientation = .horizontal
+        remoteHeader.alignment = .centerY
+        remoteHeader.spacing = 8
+
+        let configuredHosts = pairings.hosts.sorted {
+            $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending
+        }
+        let displayedHealth = RemoteHostHealthSnapshot(
+            hosts: configuredHosts,
+            healthByHostID: remoteHealth.healthByHostID,
+            isRefreshing: remoteHealth.isRefreshing
+        )
+        remoteHealth = displayedHealth
+        remoteRows.removeAll()
+        let hostRows = configuredHosts.map { host in
+            let row = RemoteConnectionRowView(host: host) { [weak self] in
                 self?.remove(host)
             }
+            row.update(
+                health: displayedHealth.health(for: host),
+                refreshing: displayedHealth.isRefreshing
+            )
+            remoteRows[host.id] = row
+            return row
         }
-        let hostList = NSStackView(views: hosts.isEmpty ? [emptyHostsLabel()] : hosts)
+        let hostViews: [NSView] = hostRows.isEmpty ? [emptyHostsLabel()] : hostRows
+        let hostList = FlippedHostStackView(arrangedViews: hostViews)
         hostList.orientation = .vertical
         hostList.spacing = 7
         hostList.alignment = .leading
+        let listContentHeight = hostRows.isEmpty
+            ? CGFloat(32)
+            : CGFloat(hostRows.count * 56 + max(0, hostRows.count - 1) * 7)
+        hostList.frame = NSRect(x: 0, y: 0, width: 636, height: listContentHeight)
+        hostList.autoresizingMask = [.width]
+        hostRows.forEach {
+            $0.widthAnchor.constraint(equalTo: hostList.widthAnchor).isActive = true
+        }
+
+        let hostScroll = NSScrollView()
+        hostScroll.drawsBackground = false
+        hostScroll.hasHorizontalScroller = false
+        hostScroll.hasVerticalScroller = hostRows.count > 3
+        hostScroll.autohidesScrollers = true
+        hostScroll.scrollerStyle = .overlay
+        hostScroll.documentView = hostList
+        hostScroll.translatesAutoresizingMaskIntoConstraints = false
 
         hostField.placeholderString = "SSH host alias"
         hostField.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
-        hostField.textColor = .white
-        hostField.backgroundColor = NSColor.white.withAlphaComponent(0.065)
+        hostField.textColor = theme.primaryText
+        hostField.backgroundColor = theme.quietSurface
         hostField.isBezeled = true
         hostField.bezelStyle = .roundedBezel
         hostField.focusRingType = .none
@@ -533,15 +1028,15 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         configureStatusLabel()
 
         let stack = NSStackView(
-            views: [header, title, subtitle, local, remoteTitle, hostList, pairRow, statusLabel, footer]
+            views: [header, title, subtitle, local, remoteHeader, hostScroll, pairRow, statusLabel, footer]
         )
         configureStack(stack)
-        stack.setCustomSpacing(24, after: header)
+        stack.setCustomSpacing(28, after: header)
         stack.setCustomSpacing(7, after: title)
         stack.setCustomSpacing(20, after: subtitle)
         stack.setCustomSpacing(28, after: local)
-        stack.setCustomSpacing(8, after: remoteTitle)
-        stack.setCustomSpacing(18, after: hostList)
+        stack.setCustomSpacing(8, after: remoteHeader)
+        stack.setCustomSpacing(18, after: hostScroll)
         content.addSubview(stack)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: content.leadingAnchor),
@@ -549,7 +1044,11 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
             stack.topAnchor.constraint(equalTo: content.topAnchor),
             header.widthAnchor.constraint(equalTo: stack.widthAnchor),
             local.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            hostList.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            remoteHeader.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            refresh.widthAnchor.constraint(equalToConstant: 26),
+            refresh.heightAnchor.constraint(equalToConstant: 26),
+            hostScroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            hostScroll.heightAnchor.constraint(equalToConstant: min(listContentHeight, 182)),
             pairRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             hostField.heightAnchor.constraint(equalToConstant: 40),
             pair.widthAnchor.constraint(equalToConstant: 92),
@@ -563,6 +1062,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
             done.widthAnchor.constraint(equalToConstant: 96),
             done.heightAnchor.constraint(equalToConstant: 40),
         ])
+        updateRemoteHealth(displayedHealth)
     }
 
     private func confirmUninstall() {
@@ -676,13 +1176,14 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
     }
 
     private func connectionRow(label: String, detail: String, removable: (() -> Void)?) -> NSView {
+        let theme = ThemeStore.shared.activeTheme
         let indicator = NSImageView(image: NSImage(
             systemSymbolName: "checkmark.circle.fill",
             accessibilityDescription: nil
         ) ?? NSImage())
-        indicator.contentTintColor = NSColor(calibratedRed: 0.40, green: 0.91, blue: 0.71, alpha: 1)
-        let name = makeLabel(label, size: 13, weight: .semibold, color: .white)
-        let secondary = makeLabel(detail, size: 11, weight: .regular, color: NSColor.white.withAlphaComponent(0.4))
+        indicator.contentTintColor = theme.accent
+        let name = makeLabel(label, size: 13, weight: .semibold, color: theme.primaryText)
+        let secondary = makeLabel(detail, size: 11, weight: .regular, color: theme.secondaryText)
         let text = NSStackView(views: [name, secondary])
         text.orientation = .vertical
         text.alignment = .leading
@@ -693,7 +1194,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
             let remove = ClosureButton(handler: removable)
             remove.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Remove")
             remove.isBordered = false
-            remove.contentTintColor = NSColor.white.withAlphaComponent(0.45)
+            remove.contentTintColor = theme.secondaryText
             views.append(remove)
             NSLayoutConstraint.activate([
                 remove.widthAnchor.constraint(equalToConstant: 28),
@@ -705,8 +1206,9 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         row.alignment = .centerY
         row.spacing = 10
         row.wantsLayer = true
-        row.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.055).cgColor
-        row.layer?.cornerRadius = 7
+        row.layer?.backgroundColor = theme.quietSurface.cgColor
+        row.layer?.cornerRadius = 10
+        row.layer?.cornerCurve = .continuous
         row.edgeInsets = NSEdgeInsets(top: 8, left: 10, bottom: 8, right: 10)
         NSLayoutConstraint.activate([
             row.heightAnchor.constraint(equalToConstant: 52),
@@ -717,7 +1219,12 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
     }
 
     private func emptyHostsLabel() -> NSView {
-        let label = makeLabel("No remote hosts paired", size: 12, weight: .regular, color: NSColor.white.withAlphaComponent(0.35))
+        let label = makeLabel(
+            "No remote hosts paired",
+            size: 12,
+            weight: .regular,
+            color: ThemeStore.shared.activeTheme.tertiaryText
+        )
         label.translatesAutoresizingMaskIntoConstraints = false
         let container = NSView()
         container.addSubview(label)
@@ -749,7 +1256,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
 
     private func makeIcon(symbol: String) -> NSImageView {
         let view = NSImageView(image: NSImage(systemSymbolName: symbol, accessibilityDescription: nil) ?? NSImage())
-        view.contentTintColor = NSColor(calibratedRed: 0.40, green: 0.91, blue: 0.71, alpha: 1)
+        view.contentTintColor = ThemeStore.shared.activeTheme.accent
         view.translatesAutoresizingMaskIntoConstraints = false
         return view
     }
@@ -782,6 +1289,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
             accessibilityDescription: "Check for Codex Notch updates"
         )
         button.imagePosition = .imageLeading
+        button.imageHugsTitle = true
         button.toolTip = "Check for a newer version of Codex Notch"
         styleSecondaryButton(button)
         checkForUpdatesButton = button
@@ -789,22 +1297,26 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
     }
 
     private func stylePrimaryButton(_ button: ClosureButton) {
+        let theme = ThemeStore.shared.activeTheme
         button.bezelStyle = .rounded
         button.font = .systemFont(ofSize: 13, weight: .semibold)
         button.contentTintColor = .black
         button.wantsLayer = true
-        button.layer?.backgroundColor = NSColor(calibratedRed: 0.40, green: 0.91, blue: 0.71, alpha: 1).cgColor
-        button.layer?.cornerRadius = 7
+        button.layer?.backgroundColor = theme.accent.cgColor
+        button.layer?.cornerRadius = 9
+        button.layer?.cornerCurve = .continuous
         button.translatesAutoresizingMaskIntoConstraints = false
     }
 
     private func styleSecondaryButton(_ button: ClosureButton) {
+        let theme = ThemeStore.shared.activeTheme
         button.bezelStyle = .rounded
         button.font = .systemFont(ofSize: 12.5, weight: .semibold)
-        button.contentTintColor = NSColor.white.withAlphaComponent(0.82)
+        button.contentTintColor = theme.primaryText
         button.wantsLayer = true
-        button.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.08).cgColor
-        button.layer?.cornerRadius = 7
+        button.layer?.backgroundColor = theme.quietSurface.cgColor
+        button.layer?.cornerRadius = 9
+        button.layer?.cornerCurve = .continuous
         button.translatesAutoresizingMaskIntoConstraints = false
     }
 

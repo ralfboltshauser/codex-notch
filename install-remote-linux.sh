@@ -14,11 +14,22 @@ command -v python3 >/dev/null 2>&1 || {
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 INSTALL_DIR="$HOME/.local/lib/codex-notch"
 HOOK="$INSTALL_DIR/codex_notch_remote-v1.py"
+LIVE="$INSTALL_DIR/codex_notch_live-v1.py"
 SOURCE_NAME=${3:-$(hostname -s)}
 HOST_ID=${4:-$(hostname -s)}
 
 mkdir -p "$INSTALL_DIR"
-install -m 0755 "$SCRIPT_DIR/remote/codex_notch_remote.py" "$HOOK"
+install_atomic() {
+  source=$1
+  destination=$2
+  temporary=$(mktemp "$INSTALL_DIR/.upload.XXXXXX")
+  trap 'rm -f "$temporary"' EXIT HUP INT TERM
+  install -m 0755 "$source" "$temporary"
+  mv -f "$temporary" "$destination"
+  trap - EXIT HUP INT TERM
+}
+install_atomic "$SCRIPT_DIR/remote/codex_notch_remote.py" "$HOOK"
+install_atomic "$SCRIPT_DIR/remote/codex_notch_live.py" "$LIVE"
 ENDPOINT_HOST=$1 PAIRING_TOKEN=$2 HOST_ID=$HOST_ID SOURCE_NAME=$SOURCE_NAME \
   python3 -c 'import json, os; print(json.dumps({
     "endpoint_host": os.environ["ENDPOINT_HOST"],
@@ -28,6 +39,6 @@ ENDPOINT_HOST=$1 PAIRING_TOKEN=$2 HOST_ID=$HOST_ID SOURCE_NAME=$SOURCE_NAME \
     "source_name": os.environ["SOURCE_NAME"],
   }))' | "$HOOK" --install-json
 
-echo "Installed the Ubuntu publisher at $HOOK"
+echo "Installed the Ubuntu completion publisher and active-task observer at $INSTALL_DIR"
 echo "Codex Notch will label notifications with: $SOURCE_NAME"
 echo "Open Codex on this host, run /hooks, and trust 'Queueing completion for Codex Notch'."

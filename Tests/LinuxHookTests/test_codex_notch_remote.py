@@ -95,6 +95,29 @@ class LinuxHookTests(unittest.TestCase):
         self.assertEqual(commands.count("/existing-stop"), 1)
         self.assertEqual(sum(remote.MARKER in command for command in commands), 1)
 
+    def test_systemd_install_owns_separate_live_service_and_restarts_it(self):
+        install = self.home / ".local/lib/codex-notch"
+        install.mkdir(parents=True)
+        publisher = install / "codex_notch_remote-v1.py"
+        observer = install / "codex_notch_live-v1.py"
+        publisher.write_text("publisher")
+        observer.write_text("observer")
+        with mock.patch.object(remote.subprocess, "run") as run:
+            remote.install_systemd_units(publisher)
+        systemd = self.home / ".config/systemd/user"
+        service = (systemd / "codex-notch-live.service").read_text()
+        self.assertIn(str(observer), service)
+        self.assertIn("Restart=always", service)
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertIn(
+            ["systemctl", "--user", "enable", "--now", "codex-notch-live.service"],
+            commands,
+        )
+        self.assertIn(
+            ["systemctl", "--user", "restart", "codex-notch-live.service"],
+            commands,
+        )
+
     def test_hook_writes_before_delivery_and_removes_after_ack(self):
         session_id = "019f5d4f-3a8d-76c0-8c2d-19451190e028"
         remote.atomic_json_write(remote.config_file(), self.configuration)
@@ -205,6 +228,32 @@ class LinuxHookTests(unittest.TestCase):
         self.assertIn("127.0.0.1", message)
         self.assertNotIn("Traceback", message)
 
+    def test_health_requires_an_installed_trusted_hook_and_reaches_receiver(self):
+        remote.install(self.configuration, script_path=SCRIPT)
+        stderr = io.StringIO()
+        with mock.patch("sys.stderr", stderr):
+            self.assertEqual(remote.main(["--health"]), 1)
+        self.assertIn("still needs trust", stderr.getvalue())
+        self.assertEqual(ProtocolHandler.received, [])
+
+        root = remote.read_hooks(remote.hooks_file())
+        key = next(iter(remote.hook_state_keys(root, remote.hooks_file())))
+        remote.codex_config_file().write_text(
+            '[hooks.state.%s]\ntrusted_hash = "sha256:test"\n' % json.dumps(key)
+        )
+
+        self.assertEqual(remote.main(["--health"]), 0)
+        self.assertEqual(ProtocolHandler.received[0]["kind"], "ping")
+
+    def test_health_reports_a_missing_completion_hook(self):
+        remote.atomic_json_write(remote.config_file(), self.configuration)
+        remote.hooks_file().parent.mkdir(parents=True, exist_ok=True)
+        remote.hooks_file().write_text('{"hooks":{}}')
+        stderr = io.StringIO()
+        with mock.patch("sys.stderr", stderr):
+            self.assertEqual(remote.main(["--health"]), 1)
+        self.assertIn("hook is not installed", stderr.getvalue())
+
     def test_uninstall_removes_configuration_and_queued_metadata(self):
         remote.atomic_json_write(remote.config_file(), self.configuration)
         (remote.config_root() / "stale").write_text("stale metadata")
@@ -230,6 +279,11 @@ class LinuxHookTests(unittest.TestCase):
         installed_script = self.home / ".local/lib/codex-notch/codex_notch_remote-v1.py"
         installed_script.parent.mkdir(parents=True)
         installed_script.write_text("stale publisher")
+        installed_live = installed_script.with_name("codex_notch_live-v1.py")
+        installed_live.write_text("stale observer")
+        systemd = self.home / ".config/systemd/user"
+        systemd.mkdir(parents=True)
+        (systemd / "codex-notch-live.service").write_text("stale service")
 
         with mock.patch.object(remote.subprocess, "run"):
             remote.uninstall()
@@ -237,6 +291,8 @@ class LinuxHookTests(unittest.TestCase):
         self.assertFalse(remote.config_root().exists())
         self.assertFalse(remote.state_root().exists())
         self.assertFalse(installed_script.exists())
+        self.assertFalse(installed_live.exists())
+        self.assertFalse((systemd / "codex-notch-live.service").exists())
         root = json.loads(remote.hooks_file().read_text())
         self.assertEqual(root["hooks"]["Stop"][0]["hooks"][0]["command"], "/other")
         backup = json.loads(

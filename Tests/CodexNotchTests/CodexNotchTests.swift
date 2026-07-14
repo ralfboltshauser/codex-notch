@@ -180,6 +180,14 @@ final class CodexNotchTests: XCTestCase {
             .compactMap { $0["command"] as? String }
         XCTAssertEqual(commands.filter { $0.contains(CodexHookInstaller.marker) }.count, 1)
         XCTAssertTrue(commands.contains("/existing-stop"))
+        XCTAssertTrue(installer.hasOwnedInstallation)
+        XCTAssertFalse(installer.needsRepair)
+        let movedInstaller = CodexHookInstaller(
+            hooksFile: hooksFile,
+            executableURL: directory.appendingPathComponent("Moved Hook")
+        )
+        XCTAssertTrue(movedInstaller.hasOwnedInstallation)
+        XCTAssertTrue(movedInstaller.needsRepair)
         let configFile = directory.appendingPathComponent("config.toml")
         let ownedStateKey = "\(hooksFile.path):stop:1:0"
         try Data("""
@@ -252,6 +260,90 @@ final class CodexNotchTests: XCTestCase {
         XCTAssertEqual(TaskStore(fileURL: file).tasks, store.tasks)
     }
 
+    func testActiveSnapshotValidationAndWireKeys() throws {
+        let snapshot = ActiveTaskSnapshot(
+            generation: UUID().uuidString.lowercased(),
+            sequence: 7,
+            generatedAt: Date(timeIntervalSince1970: 1_784_035_200),
+            tasks: [ActiveTaskEvent(
+                threadID: threadID,
+                title: "Build active tasks",
+                state: .waitingForApproval,
+                updatedAt: Date(timeIntervalSince1970: 1_784_035_199)
+            )]
+        )
+        XCTAssertTrue(snapshot.isValid)
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder.codexNotch.encode(snapshot)) as? [String: Any]
+        )
+        XCTAssertEqual(object["schema_version"] as? Int, 1)
+        let task = try XCTUnwrap((object["tasks"] as? [[String: Any]])?.first)
+        XCTAssertEqual(task["state"] as? String, "waiting_for_approval")
+        XCTAssertNil(task["cwd"])
+        XCTAssertNil(task["prompt"])
+    }
+
+    func testActiveStoreReplacesBySourceRejectsStaleSequenceAndExpires() {
+        var now = Date(timeIntervalSince1970: 1_784_035_200)
+        let store = ActiveTaskStore(now: { now })
+        let generation = UUID().uuidString.lowercased()
+        func snapshot(sequence: UInt64, title: String) -> ActiveTaskSnapshot {
+            ActiveTaskSnapshot(
+                generation: generation,
+                sequence: sequence,
+                generatedAt: now,
+                tasks: [ActiveTaskEvent(
+                    threadID: threadID,
+                    title: title,
+                    state: .running,
+                    updatedAt: now
+                )]
+            )
+        }
+        XCTAssertTrue(store.replace(sourceID: "local", sourceLabel: "This Mac", snapshot: snapshot(sequence: 2, title: "New")))
+        XCTAssertFalse(store.replace(sourceID: "local", sourceLabel: "This Mac", snapshot: snapshot(sequence: 1, title: "Old")))
+        XCTAssertEqual(store.tasks.first?.title, "New")
+        now.addTimeInterval(46)
+        XCTAssertEqual(store.tasks.first?.state, .unavailable)
+        let replacementGeneration = ActiveTaskSnapshot(
+            generation: UUID().uuidString.lowercased(),
+            sequence: 1,
+            generatedAt: now,
+            tasks: []
+        )
+        XCTAssertTrue(store.replace(sourceID: "local", sourceLabel: "This Mac", snapshot: replacementGeneration))
+        XCTAssertFalse(store.replace(sourceID: "local", sourceLabel: "This Mac", snapshot: snapshot(sequence: 3, title: "Late old process")))
+        XCTAssertTrue(store.tasks.isEmpty)
+        now.addTimeInterval(75)
+        store.reapStaleSources()
+        XCTAssertTrue(store.tasks.isEmpty)
+    }
+
+    func testActiveTaskPreferenceDefaultsOnAndToggles() throws {
+        let suite = "CodexNotchTests.ActiveTasks.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = ActiveTaskPreferences(defaults: defaults)
+        XCTAssertTrue(preferences.isVisible)
+        XCTAssertFalse(preferences.toggle())
+        XCTAssertFalse(ActiveTaskPreferences(defaults: defaults).isVisible)
+    }
+
+    func testAppServerSocketDiscoveryIncludesStableAndRemoteControlSockets() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let remoteControl = directory.appendingPathComponent("codex-rc-test")
+        try FileManager.default.createDirectory(at: remoteControl, withIntermediateDirectories: true)
+        let socket = remoteControl.appendingPathComponent("rc.sock")
+        XCTAssertTrue(FileManager.default.createFile(atPath: socket.path, contents: Data()))
+        let paths = AppServerObserver.socketCandidates(
+            codexHome: directory.appendingPathComponent("codex-home"),
+            temporaryDirectory: directory
+        )
+        XCTAssertTrue(paths.contains(directory.appendingPathComponent("codex-home/app-server-control/app-server-control.sock").path))
+        XCTAssertTrue(paths.contains(socket.path))
+    }
+
     func testNotificationSoundCatalogContainsSixBundledChoicesAndSilence() throws {
         let audible = NotificationSound.allCases.filter { $0 != .none }
 
@@ -292,10 +384,14 @@ final class CodexNotchTests: XCTestCase {
             UInt32(kVK_ANSI_Semicolon)
         )
         XCTAssertEqual(GlobalHotKeys.toggleShortcutLabel(), "⌃⇧H")
+        XCTAssertEqual(GlobalHotKeys.activeTasksShortcutLabel(), "⌃⇧R")
+        XCTAssertEqual(GlobalHotKeys.openShortcutKeyLabel(at: 0), "J")
+        XCTAssertEqual(GlobalHotKeys.openShortcutKeyLabel(at: 3), "Ö")
         XCTAssertEqual(GlobalHotKeys.openShortcutLabel(at: 9), "⌃⇧M")
         XCTAssertEqual(GlobalHotKeys.action(forHotKeyID: 310), .open(9))
         XCTAssertEqual(GlobalHotKeys.action(forHotKeyID: 210), .dismiss(9))
         XCTAssertEqual(GlobalHotKeys.action(forHotKeyID: 400), .settings)
+        XCTAssertEqual(GlobalHotKeys.action(forHotKeyID: 401), .toggleActiveTasks)
     }
 
     func testRemoteEnvelopeAndAcknowledgementUseProtocolV1() throws {
@@ -317,6 +413,27 @@ final class CodexNotchTests: XCTestCase {
         )
         XCTAssertEqual(object["status"] as? String, "duplicate")
         XCTAssertEqual(object["protocol_version"] as? Int, 1)
+
+        let activeData = try JSONEncoder.codexNotch.encode(ActiveTaskSnapshot(
+            generation: UUID().uuidString.lowercased(),
+            sequence: 1,
+            generatedAt: Date(),
+            tasks: [ActiveTaskEvent(
+                threadID: threadID,
+                title: "Running",
+                state: .running,
+                updatedAt: Date()
+            )]
+        ))
+        let activeObject = try XCTUnwrap(JSONSerialization.jsonObject(with: activeData))
+        let activeEnvelopeData = try JSONSerialization.data(withJSONObject: [
+            "protocol_version": 1,
+            "kind": "active_snapshot",
+            "token": "secret",
+            "snapshot": activeObject,
+        ])
+        let activeEnvelope = try JSONDecoder.codexNotch.decode(RemoteEnvelope.self, from: activeEnvelopeData)
+        XCTAssertTrue(try XCTUnwrap(activeEnvelope.snapshot).isValid)
     }
 
     func testRemoteSSHFailuresHideTracebacksAndStayBounded() {
@@ -334,6 +451,75 @@ final class CodexNotchTests: XCTestCase {
             RemoteHostPairer.userFacingSSHError(String(repeating: "x", count: 500)).count,
             360
         )
+    }
+
+    func testRemoteHealthSummaryHandlesMultipleHostsAndMixedFailures() {
+        let checkedAt = Date(timeIntervalSince1970: 1_784_035_200)
+        let first = RemoteHost(
+            id: "host-1",
+            label: "Build box",
+            sshAlias: "build",
+            endpointHost: "100.64.0.1",
+            createdAt: checkedAt
+        )
+        let second = RemoteHost(
+            id: "host-2",
+            label: "Home server",
+            sshAlias: "home",
+            endpointHost: "100.64.0.1",
+            createdAt: checkedAt
+        )
+
+        let checking = RemoteHostHealthSnapshot(
+            hosts: [first, second],
+            healthByHostID: [:],
+            isRefreshing: true
+        )
+        XCTAssertEqual(checking.summaryText, "Checking 2 hosts…")
+
+        let working = RemoteHostHealthSnapshot(
+            hosts: [first, second],
+            healthByHostID: [
+                first.id: .working(checkedAt: checkedAt),
+                second.id: .working(checkedAt: checkedAt),
+            ]
+        )
+        XCTAssertEqual(working.summaryText, "2 hosts working")
+        XCTAssertEqual(working.workingCount, 2)
+
+        let mixed = RemoteHostHealthSnapshot(
+            hosts: [first, second],
+            healthByHostID: [
+                first.id: .working(checkedAt: checkedAt),
+                second.id: .unreachable(message: "No route to host", checkedAt: checkedAt),
+            ]
+        )
+        XCTAssertEqual(mixed.summaryText, "1 of 2 working")
+        XCTAssertEqual(mixed.problemCount, 1)
+        XCTAssertEqual(mixed.health(for: second).statusText, "Offline")
+    }
+
+    func testRemoteHealthSeparatesOfflineHostsFromSSHConfigurationProblems() {
+        let checkedAt = Date(timeIntervalSince1970: 1_784_035_200)
+        let offline = RemoteHostPairer.healthResult(
+            for: NSError(
+                domain: "CodexNotch",
+                code: 255,
+                userInfo: [NSLocalizedDescriptionKey: "ssh: connect to host build: Connection timed out"]
+            ),
+            checkedAt: checkedAt
+        )
+        let authentication = RemoteHostPairer.healthResult(
+            for: NSError(
+                domain: "CodexNotch",
+                code: 255,
+                userInfo: [NSLocalizedDescriptionKey: "build: Permission denied (publickey)"]
+            ),
+            checkedAt: checkedAt
+        )
+
+        XCTAssertEqual(offline.statusText, "Offline")
+        XCTAssertEqual(authentication.statusText, "Needs attention")
     }
 
     func testPairingTokensPersistInPrivateFileAndAuthenticateWithoutKeychain() throws {
@@ -430,6 +616,41 @@ final class CodexNotchTests: XCTestCase {
         overlay.hide(immediately: true)
         overlay.showForEvent()
         XCTAssertTrue(overlay.hasHideTimerForTesting)
+        overlay.hide(immediately: true)
+    }
+
+    func testTaskBadgesShowNerdLettersOnlyWhileControlShiftAreHeld() {
+        _ = NSApplication.shared
+        var modifiersHeld = false
+        let overlay = OverlayController(
+            shouldReduceMotion: { true },
+            shortcutModifierState: { modifiersHeld }
+        )
+        overlay.update(tasks: [
+            CompletedTask(
+                eventID: String(repeating: "1", count: 64),
+                title: "First task",
+                url: URL(string: "codex://threads/\(threadID)")!,
+                receivedAt: Date()
+            ),
+            CompletedTask(
+                eventID: String(repeating: "2", count: 64),
+                title: "Second task",
+                url: URL(string: "codex://threads/\(threadID)")!,
+                receivedAt: Date()
+            ),
+        ])
+
+        XCTAssertEqual(overlay.taskBadgeTextsForTesting, ["1", "2"])
+        overlay.toggle()
+
+        modifiersHeld = true
+        overlay.refreshShortcutModifierStateForTesting()
+        XCTAssertEqual(overlay.taskBadgeTextsForTesting, ["J", "K"])
+
+        modifiersHeld = false
+        overlay.refreshShortcutModifierStateForTesting()
+        XCTAssertEqual(overlay.taskBadgeTextsForTesting, ["1", "2"])
         overlay.hide(immediately: true)
     }
 
@@ -606,19 +827,52 @@ final class CodexNotchTests: XCTestCase {
         overlay.hide(immediately: true)
     }
 
-    func testOverlayReportsVisibleLifetimeForScopedShortcuts() {
+    func testActiveTaskAppearsAboveTheEmptyStateAndCanBeHidden() {
         _ = NSApplication.shared
         let overlay = OverlayController()
-        var visibility: [Bool] = []
-        overlay.onVisibilityChanged = { visibility.append($0) }
+        let active = ActiveTask(
+            threadID: threadID,
+            title: "Still building",
+            sourceID: "local",
+            sourceLabel: "This Mac",
+            state: .running,
+            updatedAt: Date()
+        )
 
-        overlay.toggle()
-        overlay.toggle()
+        overlay.update(activeTasks: [active], visible: true)
+        XCTAssertTrue(overlay.hasContent)
+        XCTAssertFalse(overlay.hasEmptyStateForTesting)
+        XCTAssertGreaterThan(overlay.bodyHeightForTesting, overlay.notchHeightForTesting + 110)
 
-        XCTAssertEqual(visibility, [true, false])
+        overlay.update(activeTasks: [active], visible: false)
+        XCTAssertFalse(overlay.hasContent)
+        XCTAssertTrue(overlay.hasEmptyStateForTesting)
     }
 
-    func testWeeklyLimitMakesUsageVisibleWithoutCompletedTasks() {
+    func testOverlayShowsAggregateRemoteHostHealth() {
+        _ = NSApplication.shared
+        let overlay = OverlayController()
+        let checkedAt = Date(timeIntervalSince1970: 1_784_035_200)
+        let host = RemoteHost(
+            id: "host-1",
+            label: "Ubuntu",
+            sshAlias: "ubuntu",
+            endpointHost: "100.64.0.1",
+            createdAt: checkedAt
+        )
+
+        overlay.setRemoteHostHealth(RemoteHostHealthSnapshot(
+            hosts: [host],
+            healthByHostID: [host.id: .working(checkedAt: checkedAt)]
+        ))
+
+        XCTAssertEqual(overlay.remoteStatusTextForTesting, "Host working")
+        overlay.toggle()
+        XCTAssertTrue(overlay.isVisibleForTesting)
+        overlay.hide(immediately: true)
+    }
+
+    func testWeeklyLimitRemainsVisibleAlongsideActiveTaskSupport() {
         _ = NSApplication.shared
         let overlay = OverlayController()
         overlay.setWeeklyLimit(CodexWeeklyLimit(
@@ -631,8 +885,22 @@ final class CodexNotchTests: XCTestCase {
 
         XCTAssertTrue(overlay.isVisibleForTesting)
         XCTAssertEqual(overlay.weeklyLimitViewForTesting?.percentageTextForTesting, "63% left")
-        XCTAssertTrue(overlay.weeklyLimitViewForTesting?.resetTextForTesting.hasPrefix("Resets ") == true)
+        XCTAssertTrue(
+            overlay.weeklyLimitViewForTesting?.resetTextForTesting.hasPrefix("Resets ") == true
+        )
         overlay.hide(immediately: true)
+    }
+
+    func testOverlayReportsVisibleLifetimeForScopedShortcuts() {
+        _ = NSApplication.shared
+        let overlay = OverlayController()
+        var visibility: [Bool] = []
+        overlay.onVisibilityChanged = { visibility.append($0) }
+
+        overlay.toggle()
+        overlay.toggle()
+
+        XCTAssertEqual(visibility, [true, false])
     }
 
     func testSettingsButtonClosesHUDBeforeOpeningSettings() {
@@ -753,6 +1021,57 @@ final class CodexNotchTests: XCTestCase {
         XCTAssertTrue(checked)
     }
 
+    func testSettingsRendersThemesSoundsAndPaddedNavigationTabs() throws {
+        _ = NSApplication.shared
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pairings = PairingStore(fileURL: directory.appendingPathComponent("pairings.json"))
+        let pairer = RemoteHostPairer(store: pairings) { _ in }
+        let controller = OnboardingWindowController(
+            pairings: pairings,
+            pairer: pairer,
+            isHookInstalled: { true }
+        )
+
+        XCTAssertEqual(
+            controller.settingsTabTitlesForTesting,
+            ["Themes", "Tasks", "Sounds", "Connections"]
+        )
+        XCTAssertEqual(controller.renderedThemeChoiceCountForTesting, 6)
+        XCTAssertGreaterThanOrEqual(SettingsNavigationButton.horizontalContentPadding, 12)
+
+        controller.showSoundsForTesting()
+
+        XCTAssertEqual(controller.renderedSoundChoiceCountForTesting, 7)
+        XCTAssertEqual(NotificationSound.allCases.filter { $0 != .none }.count, 6)
+        XCTAssertTrue(NotificationSound.allCases.filter { $0 != .none }.allSatisfy {
+            $0.resourceURL != nil
+        })
+    }
+
+    func testThemePreviewIsTemporaryAndSelectionPersists() {
+        let suiteName = "CodexNotchTests.Theme.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            return XCTFail("Could not create isolated defaults")
+        }
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let themes = ThemeStore(defaults: defaults)
+
+        XCTAssertEqual(themes.selectedID, .obsidian)
+        themes.preview(.ember)
+        XCTAssertEqual(themes.activeTheme.id, .ember)
+        XCTAssertEqual(themes.selectedID, .obsidian)
+
+        themes.endPreview(.ember)
+        XCTAssertEqual(themes.activeTheme.id, .obsidian)
+        themes.preview(.aurora)
+        themes.select(.aurora)
+
+        XCTAssertEqual(themes.activeTheme.id, .aurora)
+        XCTAssertEqual(defaults.string(forKey: ThemeStore.defaultsKey), "aurora")
+        XCTAssertEqual(ThemeStore(defaults: defaults).selectedID, .aurora)
+    }
+
     func testTailscaleListenerReportsReadyBeforePairingContinues() throws {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -777,7 +1096,16 @@ final class CodexNotchTests: XCTestCase {
         )
         let token = String(repeating: "d", count: 64)
         try pairings.save(host, token: token)
-        let listener = TailscaleListener(pairings: pairings) { _ in .accepted }
+        var receivedSnapshot: ActiveTaskSnapshot?
+        let listener = TailscaleListener(
+            pairings: pairings,
+            activeDelivery: { deliveredHost, snapshot in
+                XCTAssertEqual(deliveredHost, host)
+                receivedSnapshot = snapshot
+                return true
+            },
+            delivery: { _ in .accepted }
+        )
         defer { listener.stop() }
 
         let port = try unusedLoopbackPort()
@@ -800,6 +1128,30 @@ final class CodexNotchTests: XCTestCase {
         ])
         let pairedAcknowledgement = try socketRoundTrip(pairedPayload, port: port.rawValue)
         XCTAssertEqual(pairedAcknowledgement.status, "pong")
+
+        let snapshot = ActiveTaskSnapshot(
+            generation: UUID().uuidString.lowercased(),
+            sequence: 1,
+            generatedAt: Date(),
+            tasks: [ActiveTaskEvent(
+                threadID: threadID,
+                title: "Running remotely",
+                state: .running,
+                updatedAt: Date()
+            )]
+        )
+        let snapshotObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder.codexNotch.encode(snapshot))
+        )
+        let activePayload = try JSONSerialization.data(withJSONObject: [
+            "protocol_version": 1,
+            "kind": "active_snapshot",
+            "token": token,
+            "snapshot": snapshotObject,
+        ])
+        let activeAcknowledgement = try socketRoundTrip(activePayload, port: port.rawValue)
+        XCTAssertEqual(activeAcknowledgement.status, "accepted")
+        XCTAssertEqual(receivedSnapshot, snapshot)
 
         listener.stop()
         try listener.start(host: "127.0.0.1", port: port)

@@ -5,6 +5,9 @@ import ServiceManagement
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let store = TaskStore()
+    private let activeStore = ActiveTaskStore()
+    private let activePreferences = ActiveTaskPreferences.shared
+    private let appServerObserver = AppServerObserver()
     private let pairings = PairingStore()
     private let overlay = OverlayController()
     private let notificationSounds = NotificationSoundPlayer()
@@ -16,6 +19,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotKeys: GlobalHotKeys?
     private var onboarding: OnboardingWindowController?
     private var wakeObserver: NSObjectProtocol?
+    private var activePreferenceObserver: NSObjectProtocol?
+    private var activeReaper: Timer?
     private var uninstalling = false
 
     private lazy var pairer = RemoteHostPairer(store: pairings) { [weak self] endpoint in
@@ -43,15 +48,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private lazy var remoteHealthMonitor = RemoteHostHealthMonitor(
+        pairings: pairings,
+        pairer: pairer
+    )
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         try? SMAppService.mainApp.register()
 
         overlay.onOpen = { [weak self] task in self?.activate(task) ?? false }
+        overlay.onOpenActive = { [weak self] task in self?.activate(task) ?? false }
         overlay.onOpenFinished = { [weak self] task in self?.removeOpenedTask(task) }
         overlay.onDismiss = { [weak self] index in self?.dismissTask(at: index) }
         overlay.onClear = { [weak self] in self?.store.removeAll() }
         overlay.onSettings = { [weak self] in self?.showOnboarding() }
+        overlay.onToggleActiveTasks = { [weak self] in self?.toggleActiveTasks() }
         overlay.onUpdate = { [weak self] in
             self?.overlay.hide()
             NSApp.activate(ignoringOtherApps: true)
@@ -65,8 +77,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         store.onChange = { [weak self] tasks in self?.overlay.update(tasks: tasks) }
         overlay.update(tasks: store.tasks)
-        usageMonitor.start()
+        activeStore.onChange = { [weak self] tasks in
+            guard let self else { return }
+            self.overlay.update(activeTasks: tasks, visible: self.activePreferences.isVisible)
+        }
+        overlay.update(activeTasks: activeStore.tasks, visible: activePreferences.isVisible)
         updater.start()
+        usageMonitor.start()
 
         hotKeys = GlobalHotKeys { [weak self] action in
             switch action {
@@ -76,10 +93,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .open(let index): self?.overlay.openTask(at: index, animated: false)
             case .dismiss(let index): self?.overlay.dismissTask(at: index, animated: false)
             case .settings: self?.overlay.openSettings()
+            case .toggleActiveTasks: self?.toggleActiveTasks()
             }
         }
         overlay.onVisibilityChanged = { [weak self] visible in
-            self?.hotKeys?.setSettingsShortcutEnabled(visible)
+            guard let self else { return }
+            self.hotKeys?.setSettingsShortcutEnabled(visible)
+            if visible { self.remoteHealthMonitor.refresh() }
         }
 
         inbox = CompletionInbox { [weak self] event in
@@ -89,6 +109,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = try? startRemoteListener()
         pairer.recoverMissingTokens()
         scheduleRemoteCatchUp()
+        remoteHealthMonitor.onChange = { [weak self] snapshot in
+            self?.overlay.setRemoteHostHealth(snapshot)
+            self?.onboarding?.updateRemoteHealth(snapshot)
+        }
+        remoteHealthMonitor.start()
+        appServerObserver.onSnapshot = { [weak self] sourceID, sourceLabel, snapshot in
+            _ = self?.activeStore.replace(
+                sourceID: sourceID,
+                sourceLabel: sourceLabel,
+                snapshot: snapshot
+            )
+        }
+        appServerObserver.start()
+        activePreferenceObserver = NotificationCenter.default.addObserver(
+            forName: ActiveTaskPreferences.didChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.overlay.update(activeTasks: self.activeStore.tasks, visible: self.activePreferences.isVisible)
+        }
+        activeReaper = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
+            self?.activeStore.reapStaleSources()
+        }
+        let localInstaller = CodexHookInstaller()
+        if localInstaller.hasOwnedInstallation, localInstaller.needsRepair {
+            do {
+                try localInstaller.install()
+                UserDefaults.standard.set(false, forKey: OnboardingWindowController.completionKey)
+            } catch {
+                NSLog("Could not repair the Codex Notch hook: %@", error.localizedDescription)
+            }
+        }
+        pairer.repairAllInBackground { [weak self] in
+            self?.remoteHealthMonitor.refresh(force: true)
+        }
 
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification,
@@ -97,6 +153,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] _ in
             _ = try? self?.startRemoteListener(force: true)
             self?.scheduleRemoteCatchUp()
+            self?.remoteHealthMonitor.refresh(force: true)
             self?.updater.checkForUpdateInformation()
             self?.usageMonitor.refresh()
         }
@@ -110,7 +167,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         inbox?.stop()
         listener?.stop()
+        remoteHealthMonitor.stop()
+        appServerObserver.stop()
         usageMonitor.stop()
+        activeReaper?.invalidate()
+        if let activePreferenceObserver { NotificationCenter.default.removeObserver(activePreferenceObserver) }
         if let wakeObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver)
         }
@@ -118,6 +179,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func ingest(_ event: CompletionEvent) -> CompletionAcceptance {
         guard let task = CompletedTask(event: event) else { return .rejected }
+        activeStore.remove(threadID: event.threadID, sourceID: event.sourceID)
         do {
             let inserted = try store.add(task)
             if inserted {
@@ -152,9 +214,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         listener?.stop()
         listener = nil
         listenerAddress = nil
-        let listener = TailscaleListener(pairings: pairings) { [weak self] event in
-            self?.ingest(event) ?? .rejected
-        }
+        let listener = TailscaleListener(
+            pairings: pairings,
+            activeDelivery: { [weak self] host, snapshot in
+                self?.activeStore.replace(
+                    sourceID: host.id,
+                    sourceLabel: host.label,
+                    snapshot: snapshot
+                ) ?? false
+            },
+            delivery: { [weak self] event in self?.ingest(event) ?? .rejected }
+        )
         do {
             try listener.start(host: address)
             self.listener = listener
@@ -177,7 +247,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showOnboarding() {
         if let onboarding {
+            onboarding.updateRemoteHealth(remoteHealthMonitor.snapshot)
             onboarding.present()
+            remoteHealthMonitor.refresh()
             return
         }
         onboarding = OnboardingWindowController(
@@ -188,6 +260,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         onboarding?.onConnectionsChanged = { [weak self] in
             _ = try? self?.startRemoteListener()
             self?.scheduleRemoteCatchUp()
+            self?.remoteHealthMonitor.refresh(force: true)
+            guard let self else { return }
+            let currentIDs = Set(self.pairings.hosts.map(\.id))
+            self.activeStore.tasks
+                .map(\.sourceID)
+                .filter { $0 != "local" && !currentIDs.contains($0) }
+                .forEach { self.activeStore.removeSource($0) }
+        }
+        onboarding?.onRefreshConnections = { [weak self] in
+            self?.remoteHealthMonitor.refresh(force: true)
         }
         onboarding?.onCheckForUpdates = { [weak self] in
             self?.updater.checkForUpdates()
@@ -195,7 +277,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         onboarding?.onUninstall = { [weak self] completion in
             self?.uninstall(completion: completion)
         }
+        onboarding?.updateRemoteHealth(remoteHealthMonitor.snapshot)
         onboarding?.present()
+        remoteHealthMonitor.refresh()
+    }
+
+    @objc func openSettings(_ sender: Any?) {
+        overlay.hide(immediately: true)
+        showOnboarding()
     }
 
     private func uninstall(completion: @escaping (Result<Void, Error>) -> Void) {
@@ -222,7 +311,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 do {
                     try LocalApplicationUninstaller.prepare(pairings: self.pairings)
-                    completion(.success(()))
+                    completion(.success(Void()))
                     NSApp.terminate(nil)
                 } catch {
                     self.uninstalling = false
@@ -250,6 +339,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         return true
+    }
+
+    private func activate(_ task: ActiveTask) -> Bool {
+        guard let url = task.url, NSWorkspace.shared.open(url) else {
+            NSSound.beep()
+            return false
+        }
+        return true
+    }
+
+    private func toggleActiveTasks() {
+        _ = activePreferences.toggle()
     }
 
     private func removeOpenedTask(_ task: CompletedTask) {

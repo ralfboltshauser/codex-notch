@@ -3,6 +3,7 @@ set -eu
 
 INSTALL_DIR="$HOME/.local/lib/codex-notch"
 HOOK="$INSTALL_DIR/codex_notch_remote-v1.py"
+LIVE="$INSTALL_DIR/codex_notch_live-v1.py"
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 CLEANER="$SCRIPT_DIR/remote/codex_notch_remote.py"
 
@@ -15,5 +16,6 @@ else
   exit 1
 fi
 rm -f "$HOOK"
+rm -f "$LIVE"
 rmdir "$INSTALL_DIR" 2>/dev/null || true
-echo "Removed the Ubuntu publisher, hook and hook backup, retry services, configuration, and queue."
+echo "Removed the Ubuntu publishers, hook and hook backup, services, configuration, and queue."
