@@ -437,6 +437,20 @@ final class CodexNotchTests: XCTestCase {
         XCTAssertTrue(controller.window?.isVisible == false)
     }
 
+    func testSettingsVersionDescriptionIncludesReleaseAndBuildNumbers() {
+        XCTAssertEqual(
+            OnboardingWindowController.versionDescription(info: [
+                "CFBundleShortVersionString": "0.3.6",
+                "CFBundleVersion": "9",
+            ]),
+            "Version 0.3.6 (9)"
+        )
+        XCTAssertEqual(
+            OnboardingWindowController.versionDescription(info: [:]),
+            "Version unavailable"
+        )
+    }
+
     func testTailscaleListenerReportsReadyBeforePairingContinues() throws {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
