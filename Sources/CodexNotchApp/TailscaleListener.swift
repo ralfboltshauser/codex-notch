@@ -48,10 +48,11 @@ private final class ListenerShutdownState {
 
 final class TailscaleListener {
     static let defaultPort: NWEndpoint.Port = 47391
-    static let maximumFrameSize = 4096
+    static let maximumFrameSize = 65_536
 
     private let pairings: PairingStore
     private let delivery: (CompletionEvent) -> CompletionAcceptance
+    private let activeDelivery: (RemoteHost, ActiveTaskSnapshot) -> Bool
     private let queue = DispatchQueue(label: "com.ralfbuilds.codex-notch.tailscale")
     private var listener: NWListener?
     private var startup: ListenerStartupState?
@@ -60,9 +61,11 @@ final class TailscaleListener {
 
     init(
         pairings: PairingStore,
+        activeDelivery: @escaping (RemoteHost, ActiveTaskSnapshot) -> Bool = { _, _ in false },
         delivery: @escaping (CompletionEvent) -> CompletionAcceptance
     ) {
         self.pairings = pairings
+        self.activeDelivery = activeDelivery
         self.delivery = delivery
     }
 
@@ -177,6 +180,15 @@ final class TailscaleListener {
         }
         if envelope.kind == "ping" {
             send(.pong, over: connection)
+            return
+        }
+        if envelope.kind == "active_snapshot", let snapshot = envelope.snapshot {
+            guard snapshot.isValid else {
+                send(.rejected("invalid active task snapshot"), over: connection)
+                return
+            }
+            let accepted = DispatchQueue.main.sync { activeDelivery(host, snapshot) }
+            send(accepted ? .snapshotAccepted : .rejected("stale active task snapshot"), over: connection)
             return
         }
         guard envelope.kind == "completion", let received = envelope.event else {

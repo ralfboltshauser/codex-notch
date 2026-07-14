@@ -7,6 +7,7 @@ final class GlobalHotKeys {
         case open(Int)
         case dismiss(Int)
         case settings
+        case toggleActiveTasks
     }
 
     struct NerdBinding: Equatable {
@@ -36,8 +37,14 @@ final class GlobalHotKeys {
         nerdBindings.first(where: { $0.action == .toggle })?.displayLabel ?? "⌃⇧H"
     }
 
+    static func activeTasksShortcutLabel() -> String { "⌃⇧R" }
+
+    static func openShortcutKeyLabel(at index: Int) -> String? {
+        nerdBindings.first(where: { $0.action == .open(index) })?.keyLabel
+    }
+
     static func openShortcutLabel(at index: Int) -> String? {
-        nerdBindings.first(where: { $0.action == .open(index) })?.displayLabel
+        openShortcutKeyLabel(at: index).map { "⌃⇧\($0)" }
     }
 
     static func dismissShortcutLabel(at index: Int) -> String? {
@@ -53,6 +60,7 @@ final class GlobalHotKeys {
     private let signature: OSType = 0x4E_4F_54_43 // NOTC
     private static let nerdIDBase: UInt32 = 300
     private static let settingsID: UInt32 = 400
+    private static let activeTasksID: UInt32 = 401
 
     init(handler: @escaping (Action) -> Void) {
         self.handler = handler
@@ -114,6 +122,11 @@ final class GlobalHotKeys {
     }
 
     private func registerAll() {
+        register(
+            keyCode: UInt32(kVK_ANSI_R),
+            modifiers: UInt32(controlKey | shiftKey),
+            id: Self.activeTasksID
+        )
         register(keyCode: UInt32(kVK_ANSI_0), modifiers: UInt32(controlKey | shiftKey), id: 100)
         let openNumberKeys: [UInt32] = [
             UInt32(kVK_ANSI_1), UInt32(kVK_ANSI_2), UInt32(kVK_ANSI_3),
@@ -172,6 +185,7 @@ final class GlobalHotKeys {
         case 1...9: return .open(Int(id - 1))
         case 201...210: return .dismiss(Int(id - 201))
         case settingsID: return .settings
+        case activeTasksID: return .toggleActiveTasks
         default: return nil
         }
     }

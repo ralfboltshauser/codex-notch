@@ -7,6 +7,7 @@ final class RemoteHostPairer {
     private static let aliasPattern = try! NSRegularExpression(pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
     private static let remoteDirectory = "$HOME/.local/lib/codex-notch"
     private static let remoteScript = "$HOME/.local/lib/codex-notch/codex_notch_remote-v1.py"
+    private static let remoteLiveScript = "$HOME/.local/lib/codex-notch/codex_notch_live-v1.py"
     private let store: PairingStore
     private let prepareReceiver: (String) throws -> Void
 
@@ -57,12 +58,8 @@ final class RemoteHostPairer {
         ]
         let configurationData = try JSONSerialization.data(withJSONObject: configuration)
 
-        try runSSH(
-            alias: sshAlias,
-            command: "mkdir -p \"$HOME/.local/lib/codex-notch\" && umask 077 && cat > \"\(Self.remoteScript)\" && chmod 700 \"\(Self.remoteScript)\"",
-            input: scriptData
-        )
         do {
+            try uploadScripts(alias: sshAlias)
             try store.save(host, token: token)
             try runSSH(
                 alias: sshAlias,
@@ -94,6 +91,69 @@ final class RemoteHostPairer {
                 input: nil
             )
         }
+    }
+
+    func repair(_ host: RemoteHost) throws {
+        try uploadScripts(alias: host.sshAlias)
+        try runSSH(
+            alias: host.sshAlias,
+            command: "\"\(Self.remoteScript)\" --repair && \"\(Self.remoteScript)\" --ping",
+            input: nil
+        )
+    }
+
+    func repairAllInBackground(completion: (() -> Void)? = nil) {
+        let hosts = store.hosts
+        guard !hosts.isEmpty else { completion?(); return }
+        DispatchQueue.global(qos: .utility).async {
+            hosts.forEach { try? self.repair($0) }
+            DispatchQueue.main.async { completion?() }
+        }
+    }
+
+    func checkHealth(_ host: RemoteHost, checkedAt: Date = Date()) -> RemoteHostHealth {
+        let command = """
+        test -x "\(Self.remoteScript)" || {
+            echo "Remote publisher is not installed" >&2
+            exit 78
+        }
+        if "\(Self.remoteScript)" --help 2>&1 | grep -F -q -- '--health'; then
+            "\(Self.remoteScript)" --health
+        else
+            hooks_file="${CODEX_HOME:-$HOME/.codex}/hooks.json"
+            test -r "$hooks_file" && grep -F -q -- '--codex-notch-remote-hook-v1' "$hooks_file" || {
+                echo "Codex completion hook is not installed" >&2
+                exit 78
+            }
+            "\(Self.remoteScript)" --ping
+        fi
+        """
+        do {
+            try runSSH(alias: host.sshAlias, command: command, input: nil)
+            return .working(checkedAt: checkedAt)
+        } catch let error as NSError {
+            return Self.healthResult(for: error, checkedAt: checkedAt)
+        }
+    }
+
+    static func healthResult(for error: NSError, checkedAt: Date) -> RemoteHostHealth {
+        let message = error.localizedDescription
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+        let connectivityFailures = [
+            "connection refused",
+            "connection timed out",
+            "operation timed out",
+            "no route to host",
+            "network is unreachable",
+            "connection reset",
+        ]
+        let isConnectivityFailure = error.domain == "CodexNotch"
+            && error.code == 255
+            && connectivityFailures.contains { message.localizedCaseInsensitiveContains($0) }
+        return isConnectivityFailure
+            ? .unreachable(message: message, checkedAt: checkedAt)
+            : .needsAttention(message: message, checkedAt: checkedAt)
     }
 
     func recoverMissingTokens() {
@@ -305,6 +365,53 @@ final class RemoteHostPairer {
         return data
     }
 
+    private func bundledRemoteLiveScript() throws -> Data {
+        guard let script = Bundle.main.resourceURL?
+            .appendingPathComponent("remote/codex_notch_live.py"),
+              let data = try? Data(contentsOf: script) else {
+            throw NSError(
+                domain: "CodexNotch",
+                code: 27,
+                userInfo: [NSLocalizedDescriptionKey: "The bundled Ubuntu active-task observer is missing"]
+            )
+        }
+        return data
+    }
+
+    private func uploadScripts(alias: String) throws {
+        try runSSH(
+            alias: alias,
+            command: Self.atomicUploadCommand(
+                destination: Self.remoteScript,
+                temporaryName: ".publisher.XXXXXX"
+            ),
+            input: try bundledRemoteScript()
+        )
+        try runSSH(
+            alias: alias,
+            command: Self.atomicUploadCommand(
+                destination: Self.remoteLiveScript,
+                temporaryName: ".observer.XXXXXX"
+            ),
+            input: try bundledRemoteLiveScript()
+        )
+    }
+
+    private static func atomicUploadCommand(destination: String, temporaryName: String) -> String {
+        """
+        set -eu
+        directory="\(remoteDirectory)"
+        mkdir -p "$directory"
+        umask 077
+        temporary=$(mktemp "$directory/\(temporaryName)")
+        trap 'rm -f "$temporary"' EXIT HUP INT TERM
+        cat > "$temporary"
+        chmod 700 "$temporary"
+        mv -f "$temporary" "\(destination)"
+        trap - EXIT HUP INT TERM
+        """
+    }
+
     private static let remoteUninstallCommand = """
     set -eu
     temporary=$(mktemp "${TMPDIR:-/tmp}/codex-notch-uninstall.XXXXXX")
@@ -313,6 +420,7 @@ final class RemoteHostPairer {
     chmod 700 "$temporary"
     "$temporary" --uninstall
     rm -f "\(remoteScript)"
+    rm -f "\(remoteLiveScript)"
     rmdir "\(remoteDirectory)" 2>/dev/null || true
 
     codex_home=${CODEX_HOME:-$HOME/.codex}
@@ -327,10 +435,12 @@ final class RemoteHostPairer {
     done
     for artifact in \
         "\(remoteScript)" \
+        "\(remoteLiveScript)" \
         "$config_home/codex-notch" \
         "$state_home/codex-notch" \
         "$systemd_home/codex-notch-flush.service" \
-        "$systemd_home/codex-notch-flush.timer"; do
+        "$systemd_home/codex-notch-flush.timer" \
+        "$systemd_home/codex-notch-live.service"; do
         if [ -e "$artifact" ]; then
             echo "Codex Notch artifact remains at $artifact" >&2
             exit 1
@@ -338,7 +448,8 @@ final class RemoteHostPairer {
     done
     if command -v systemctl >/dev/null 2>&1; then
         if systemctl --user is-active --quiet codex-notch-flush.timer \
-            || systemctl --user is-active --quiet codex-notch-flush.service; then
+            || systemctl --user is-active --quiet codex-notch-flush.service \
+            || systemctl --user is-active --quiet codex-notch-live.service; then
             echo "Codex Notch retry service is still active" >&2
             exit 1
         fi

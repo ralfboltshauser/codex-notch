@@ -12,12 +12,14 @@ struct RemoteEnvelope: Decodable {
     let kind: String
     let token: String
     let event: CompletionEvent?
+    let snapshot: ActiveTaskSnapshot?
 
     enum CodingKeys: String, CodingKey {
         case protocolVersion = "protocol_version"
         case kind
         case token
         case event
+        case snapshot
     }
 }
 
@@ -45,6 +47,10 @@ struct RemoteAcknowledgement: Codable {
 
     static var pong: Self {
         Self(protocolVersion: 1, status: "pong", eventID: nil, error: nil)
+    }
+
+    static var snapshotAccepted: Self {
+        Self(protocolVersion: 1, status: "accepted", eventID: nil, error: nil)
     }
 
     static func rejected(_ error: String, eventID: String? = nil) -> Self {

@@ -1,11 +1,17 @@
 # Codex Notch
 
-Codex Notch is a native macOS overlay for finished Codex turns and remaining
-weekly Codex usage. It works
+Codex Notch is a native macOS overlay for active and finished Codex turns. It works
 entirely on one Mac, and can also receive completions from Ubuntu hosts over an
 existing Tailscale network. There is no hosted relay, account, or public port.
 
 ## How it works
+
+Active tasks come from Codex App Server's runtime status rather than guessed
+process or transcript state. Codex Notch connects read-only to the local Unix
+WebSocket, keeps the latest full snapshot in memory, and shows running tasks as
+well as tasks waiting for approval or input. Active tasks never auto-open the
+notch. If the observer disconnects, rows first show that state and then expire;
+live snapshots are never queued or replayed.
 
 ### Mac-only
 
@@ -31,7 +37,9 @@ turns, after wake, when the notch is opened, and every five minutes.
 The Mac app pairs an Ubuntu host through an SSH alias from `~/.ssh/config`. It
 uploads the Python publisher, generates a 256-bit token, and gives the publisher
 the Mac's Tailscale IPv4 address. The Ubuntu hook writes every completion to a
-durable outbox before attempting delivery.
+durable outbox before attempting delivery. A separate systemd user service
+observes that host's local App Server and sends replace-only active snapshots;
+its failures cannot block the completion hook.
 
 Delivery uses a length-prefixed JSON message on TCP port `47391` over Tailscale.
 The Mac authenticates the token, persists the event, and only then acknowledges
@@ -39,9 +47,8 @@ it. A systemd user timer retries queued events every 30 seconds; the Mac also
 asks each paired host to flush after launch and wake. The queue keeps at most 500
 events and expires undelivered events after seven days.
 
-Opening a remote item launches `ssh <alias> codex resume <thread-id>` in
-Terminal, because that transcript belongs to the Ubuntu host rather than the
-Mac's local Codex store.
+Opening a local or remote item uses Codex's validated
+`codex://threads/<uuid>` deep link.
 
 ## Requirements
 
@@ -68,6 +75,12 @@ To add Ubuntu, enter its SSH alias in **Connections** and choose **Pair**. The
 app opens a remote Codex session so you can review and trust `Queueing completion
 for Codex Notch` there as well.
 
+The notch summarizes all paired hosts in one compact status badge. **Connections**
+shows the result for each host and can refresh it manually. A working result
+verifies the remote publisher, Codex hook registration, SSH reachability, and
+an authenticated ping back to the Mac receiver. Current publishers also report
+an untrusted hook as needing attention.
+
 ### Nerd shortcuts
 
 These global shortcuts follow the Swiss German keyboard layout. Hold
@@ -76,18 +89,33 @@ These global shortcuts follow the Swiss German keyboard layout. Hold
 | Key | Action |
 | --- | --- |
 | `H` | Toggle the notch |
+| `R` | Show or hide active tasks |
 | `J`, `K`, `L`, `Ö` | Open tasks 1–4 |
 | `U`, `I`, `O`, `P` | Open tasks 5–8 |
 | `N`, `M` | Open tasks 9–10 |
 
 The existing number-key shortcuts remain available.
+While Control and Shift are held with the notch open, each completed-task number
+changes to its corresponding nerd-key letter and switches back on release.
 While the notch is open, <kbd>Command</kbd>+<kbd>,</kbd> opens Settings. The
 shortcut is released back to the foreground app as soon as the notch closes.
+
+Under **Settings → Themes**, choose from six deep-color themes. Hovering a
+theme previews it live across the settings backdrop and notch mockup; clicking
+keeps the choice across launches. The hardware-facing neck remains true black
+so every palette still blends into a MacBook display notch.
 
 Under **Settings → Sounds**, choose from six short completion tones or select
 **No Sound**. A choice previews immediately and is remembered across launches.
 Sounds play only for newly accepted local or remote Stop-hook events; opening the
 notch manually stays quiet.
+
+Under **Settings → Tasks**, active task display can be disabled without stopping
+the observer. Keeping the in-memory snapshot hot makes re-enabling immediate.
+The same `⌃⇧R` shortcut is shown beside the active-task control in the notch.
+The independent **Do Not Disturb** switch keeps completed tasks and available
+updates in the notch without opening it automatically. Manual shortcuts and the
+selected completion sound continue to work; macOS Focus is not read or changed.
 
 Choose **Check for Updates** at the bottom of Settings to ask Sparkle for the
 latest signed release immediately.
@@ -125,7 +153,9 @@ Uninstall it with:
   and the app constructs the local or SSH action itself.
 - Weekly usage comes from Codex's local app-server protocol. Codex Notch does
   not inspect auth files, browser storage, or terminal output.
-- Events contain only thread ID, turn ID, title, source identity, and timestamp.
+- Completion events contain only thread ID, turn ID, title, source identity, and
+  timestamp. Active snapshots contain only thread ID, title, display state, and
+  timestamp.
   Working directories, prompts, transcripts, and model output are not sent.
 - Delivery is at least once. Content-derived event IDs make retries idempotent.
 - Hook installation merges with existing `hooks.json` entries and creates a
@@ -186,11 +216,11 @@ copy is stored outside Git at
 To publish a release after the Apple secrets are configured:
 
 ```sh
-./prepare-release.sh 0.3.8
+./prepare-release.sh 0.4.0
 git add AppResources/Info.plist
-git commit -m 'Prepare 0.3.8 release'
-git tag v0.3.8
-git push origin main v0.3.8
+git commit -m 'Prepare 0.4.0 release'
+git tag v0.4.0
+git push origin main v0.4.0
 ```
 
 The tag workflow builds and signs the complete app, notarizes and staples it,

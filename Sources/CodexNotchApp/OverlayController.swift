@@ -1,4 +1,5 @@
 import AppKit
+import CoreGraphics
 import QuartzCore
 
 enum NotchMotion {
@@ -19,7 +20,7 @@ final class FocuslessPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
-final class ClosureButton: NSButton {
+class ClosureButton: NSButton {
     var handler: (() -> Void)?
     private var pointerIsDown = false
 
@@ -72,6 +73,7 @@ final class ClosureButton: NSButton {
 
 final class HUDContentView: NSView {
     private static let pitchBlack = CGColor(gray: 0, alpha: 1)
+    private let backgroundGradient = CAGradientLayer()
 
     var onHoverChanged: ((Bool) -> Void)?
     var controls: [NSView] = []
@@ -87,11 +89,19 @@ final class HUDContentView: NSView {
     private weak var headerView: NSView?
     private var taskRows: [TaskRowView] = []
 
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
+    init(theme: NotchTheme) {
+        super.init(frame: .zero)
         wantsLayer = true
         layer?.backgroundColor = Self.pitchBlack
         layer?.opacity = 1
+        backgroundGradient.startPoint = CGPoint(x: 0.5, y: 0)
+        backgroundGradient.endPoint = CGPoint(x: 0.5, y: 1)
+        backgroundGradient.colors = [
+            theme.hudBottom.cgColor,
+            theme.hudTop.cgColor,
+            Self.pitchBlack,
+        ]
+        layer?.addSublayer(backgroundGradient)
         shapeMask.fillColor = Self.pitchBlack
         layer?.mask = shapeMask
     }
@@ -111,6 +121,13 @@ final class HUDContentView: NSView {
         super.layout()
         CATransaction.begin()
         CATransaction.setDisableActions(true)
+        backgroundGradient.frame = bounds
+        let blackBlendStart = max(0.62, 1 - (notchHeight + 18) / max(1, bounds.height))
+        backgroundGradient.locations = [
+            NSNumber(value: 0),
+            NSNumber(value: blackBlendStart),
+            NSNumber(value: 1),
+        ]
         shapeMask.frame = bounds
         shapeMask.path = islandPath(in: bounds, expansion: targetExpansion)
         CATransaction.commit()
@@ -363,17 +380,23 @@ final class HUDContentView: NSView {
 }
 
 final class NumberBadgeView: NSView {
-    init(number: Int) {
+    private let numberText: String
+    private let shortcutText: String?
+    private let label: NSTextField
+
+    init(number: Int, shortcut: String?, theme: NotchTheme) {
+        numberText = "\(number)"
+        shortcutText = shortcut
+        label = NSTextField(labelWithString: numberText)
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = true
-        layer?.backgroundColor = NSColor.white.withAlphaComponent(0.10).cgColor
+        layer?.backgroundColor = theme.accent.withAlphaComponent(0.14).cgColor
         layer?.cornerRadius = 9
         layer?.cornerCurve = .continuous
 
-        let label = NSTextField(labelWithString: "\(number)")
         label.font = .monospacedDigitSystemFont(ofSize: 11.5, weight: .semibold)
-        label.textColor = NSColor.white.withAlphaComponent(0.86)
+        label.textColor = theme.primaryText
         label.alignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
         addSubview(label)
@@ -386,18 +409,24 @@ final class NumberBadgeView: NSView {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func showShortcut(_ visible: Bool) {
+        label.stringValue = visible ? (shortcutText ?? numberText) : numberText
+    }
+
+    var textForTesting: String { label.stringValue }
 }
 
 final class EmptyStateView: NSView {
-    init(updateVersion: String?) {
+    init(updateVersion: String?, theme: NotchTheme) {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
 
         let iconWell = NSView()
         iconWell.translatesAutoresizingMaskIntoConstraints = false
         iconWell.wantsLayer = true
-        iconWell.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.055).cgColor
-        iconWell.layer?.borderColor = NSColor.white.withAlphaComponent(0.075).cgColor
+        iconWell.layer?.backgroundColor = theme.surface.cgColor
+        iconWell.layer?.borderColor = theme.border.cgColor
         iconWell.layer?.borderWidth = 1
         iconWell.layer?.cornerRadius = 18
         iconWell.layer?.cornerCurve = .continuous
@@ -409,30 +438,25 @@ final class EmptyStateView: NSView {
             accessibilityDescription: symbolDescription
         ) ?? NSImage())
         icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
-        icon.contentTintColor = NSColor(
-            calibratedRed: 0.40,
-            green: 0.91,
-            blue: 0.71,
-            alpha: 1
-        )
+        icon.contentTintColor = theme.accent
         icon.translatesAutoresizingMaskIntoConstraints = false
         iconWell.addSubview(icon)
 
         let title = NSTextField(labelWithString: updateVersion == nil ? "All clear" : "Update ready")
         title.font = .systemFont(ofSize: 13, weight: .medium)
-        title.textColor = NSColor.white.withAlphaComponent(0.88)
+        title.textColor = theme.primaryText
         title.alignment = .center
 
         let detailText = updateVersion.map { "Codex Notch \($0) is ready to install." }
             ?? "Completed Codex tasks will appear here."
         let detail = NSTextField(labelWithString: detailText)
         detail.font = .systemFont(ofSize: 11.5, weight: .regular)
-        detail.textColor = NSColor.white.withAlphaComponent(0.45)
+        detail.textColor = theme.secondaryText
         detail.alignment = .center
 
         let settingsHint = NSTextField(labelWithString: "⌘,  Settings")
         settingsHint.font = .monospacedSystemFont(ofSize: 10.5, weight: .medium)
-        settingsHint.textColor = NSColor.white.withAlphaComponent(0.34)
+        settingsHint.textColor = theme.tertiaryText
         settingsHint.alignment = .center
 
         let stack = NSStackView(views: [iconWell, title, detail, settingsHint])
@@ -460,12 +484,73 @@ final class EmptyStateView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 }
 
+final class RemoteHostStatusBadgeView: NSView {
+    private let dot = NSView()
+    private let label = NSTextField(labelWithString: "")
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.white.withAlphaComponent(0.065).cgColor
+        layer?.cornerRadius = 9
+        layer?.cornerCurve = .continuous
+
+        dot.translatesAutoresizingMaskIntoConstraints = false
+        dot.wantsLayer = true
+        dot.layer?.cornerRadius = 3
+        label.font = .systemFont(ofSize: 10.5, weight: .medium)
+        label.textColor = NSColor.white.withAlphaComponent(0.62)
+        label.lineBreakMode = .byTruncatingTail
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(dot)
+        addSubview(label)
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 22),
+            dot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            dot.centerYAnchor.constraint(equalTo: centerYAnchor),
+            dot.widthAnchor.constraint(equalToConstant: 6),
+            dot.heightAnchor.constraint(equalToConstant: 6),
+            label.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 6),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -0.5),
+        ])
+        setContentCompressionResistancePriority(.required, for: .horizontal)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func update(_ snapshot: RemoteHostHealthSnapshot) {
+        label.stringValue = snapshot.summaryText
+        let color: NSColor
+        if snapshot.problemCount > 0 {
+            color = snapshot.workingCount > 0 ? .systemOrange : .systemRed
+        } else if snapshot.checkingCount > 0 {
+            color = NSColor.white.withAlphaComponent(0.42)
+        } else {
+            color = NSColor(calibratedRed: 0.40, green: 0.91, blue: 0.71, alpha: 1)
+        }
+        dot.layer?.backgroundColor = color.cgColor
+        toolTip = snapshot.hosts.map { host in
+            let health = snapshot.health(for: host)
+            if let detail = health.detailText {
+                return "\(host.label): \(health.statusText) — \(detail)"
+            }
+            return "\(host.label): \(health.statusText)"
+        }.joined(separator: "\n")
+        setAccessibilityLabel("Remote hosts: \(snapshot.summaryText)")
+    }
+}
+
 final class TaskRowView: NSView {
     let task: CompletedTask
 
     private let openHandler: () -> Void
     private let shouldReduceMotion: () -> Bool
     private let dismissButton: ClosureButton
+    private let numberBadge: NumberBadgeView
+    private let theme: NotchTheme
     private var tracking: NSTrackingArea?
     private var isHovered = false
     private var isTrackingPress = false
@@ -475,25 +560,30 @@ final class TaskRowView: NSView {
     init(
         task: CompletedTask,
         index: Int,
+        theme: NotchTheme,
         shouldReduceMotion: @escaping () -> Bool,
         open: @escaping () -> Void,
         dismiss: @escaping () -> Void
     ) {
         self.task = task
+        self.theme = theme
         self.shouldReduceMotion = shouldReduceMotion
         openHandler = open
         dismissButton = ClosureButton(handler: dismiss)
+        numberBadge = NumberBadgeView(
+            number: index + 1,
+            shortcut: GlobalHotKeys.openShortcutKeyLabel(at: index),
+            theme: theme
+        )
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = true
         layer?.cornerRadius = 12
         layer?.cornerCurve = .continuous
 
-        let number = NumberBadgeView(number: index + 1)
-
         let title = NSTextField(labelWithString: task.title)
         title.font = .systemFont(ofSize: 14, weight: .medium)
-        title.textColor = NSColor.white.withAlphaComponent(0.95)
+        title.textColor = theme.primaryText
         title.lineBreakMode = .byTruncatingTail
         title.maximumNumberOfLines = 1
         title.translatesAutoresizingMaskIntoConstraints = false
@@ -501,7 +591,7 @@ final class TaskRowView: NSView {
 
         let source = NSTextField(labelWithString: task.sourceLabel)
         source.font = .systemFont(ofSize: 10.5, weight: .medium)
-        source.textColor = NSColor.white.withAlphaComponent(0.56)
+        source.textColor = theme.secondaryText
         source.lineBreakMode = .byTruncatingTail
         source.translatesAutoresizingMaskIntoConstraints = false
         source.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
@@ -510,22 +600,22 @@ final class TaskRowView: NSView {
             labelWithString: GlobalHotKeys.openShortcutLabel(at: index) ?? ""
         )
         shortcut.font = .monospacedSystemFont(ofSize: 10.5, weight: .medium)
-        shortcut.textColor = NSColor.white.withAlphaComponent(0.52)
+        shortcut.textColor = theme.secondaryText
         shortcut.translatesAutoresizingMaskIntoConstraints = false
 
         dismissButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Dismiss task")
-        dismissButton.contentTintColor = NSColor.white.withAlphaComponent(0.66)
+        dismissButton.contentTintColor = theme.secondaryText
         dismissButton.toolTip = GlobalHotKeys.dismissShortcutLabel(at: index)
             .map { "Dismiss — \($0)" } ?? "Dismiss"
         dismissButton.alphaValue = 0
         dismissButton.translatesAutoresizingMaskIntoConstraints = false
 
-        [number, title, source, shortcut, dismissButton].forEach(addSubview)
+        [numberBadge, title, source, shortcut, dismissButton].forEach(addSubview)
         NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: 46),
-            number.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-            number.centerYAnchor.constraint(equalTo: centerYAnchor),
-            title.leadingAnchor.constraint(equalTo: number.trailingAnchor, constant: 11),
+            numberBadge.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            numberBadge.centerYAnchor.constraint(equalTo: centerYAnchor),
+            title.leadingAnchor.constraint(equalTo: numberBadge.trailingAnchor, constant: 11),
             title.centerYAnchor.constraint(equalTo: centerYAnchor),
             source.leadingAnchor.constraint(greaterThanOrEqualTo: title.trailingAnchor, constant: 14),
             source.widthAnchor.constraint(lessThanOrEqualToConstant: 120),
@@ -542,6 +632,12 @@ final class TaskRowView: NSView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    func setShortcutLetterVisible(_ visible: Bool) {
+        numberBadge.showShortcut(visible)
+    }
+
+    var badgeTextForTesting: String { numberBadge.textForTesting }
 
     override func mouseDown(with event: NSEvent) {
         isTrackingPress = true
@@ -581,8 +677,8 @@ final class TaskRowView: NSView {
         timingFunction: CAMediaTimingFunction
     ) {
         guard let layer else { return }
-        let targetBackground = NSColor.white.withAlphaComponent(
-            isPressed ? 0.13 : (isHovered ? 0.075 : 0)
+        let targetBackground = (
+            isPressed ? theme.pressedSurface : (isHovered ? theme.hoverSurface : NSColor.clear)
         ).cgColor
         let targetTransform = isPressed && !shouldReduceMotion()
             ? CATransform3DMakeScale(0.98, 0.98, 1)
@@ -728,7 +824,7 @@ final class TaskRowView: NSView {
         layer.opacity = 0
         layer.transform = targetTransform
         if selected {
-            layer.backgroundColor = NSColor.white.withAlphaComponent(0.13).cgColor
+            layer.backgroundColor = theme.pressedSurface.cgColor
         }
         CATransaction.commit()
 
@@ -790,7 +886,7 @@ final class WeeklyLimitView: NSView {
     let percentageTextForTesting: String
     let resetTextForTesting: String
 
-    init(limit: CodexWeeklyLimit) {
+    init(limit: CodexWeeklyLimit, theme: NotchTheme) {
         percentageTextForTesting = "\(limit.remainingPercent)% left"
         if let resetsAt = limit.resetsAt {
             let formatter = DateFormatter()
@@ -808,12 +904,12 @@ final class WeeklyLimitView: NSView {
             systemSymbolName: "gauge.with.dots.needle.33percent",
             accessibilityDescription: "Weekly Codex limit"
         ) ?? NSImage())
-        icon.contentTintColor = NSColor.white.withAlphaComponent(0.52)
+        icon.contentTintColor = theme.secondaryText
         icon.translatesAutoresizingMaskIntoConstraints = false
 
         let title = NSTextField(labelWithString: "Weekly limit")
         title.font = .systemFont(ofSize: 11, weight: .medium)
-        title.textColor = NSColor.white.withAlphaComponent(0.68)
+        title.textColor = theme.secondaryText
         title.translatesAutoresizingMaskIntoConstraints = false
 
         let progress = NSProgressIndicator()
@@ -827,12 +923,12 @@ final class WeeklyLimitView: NSView {
 
         let percentage = NSTextField(labelWithString: percentageTextForTesting)
         percentage.font = .monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
-        percentage.textColor = NSColor.white.withAlphaComponent(0.88)
+        percentage.textColor = theme.primaryText
         percentage.translatesAutoresizingMaskIntoConstraints = false
 
         let reset = NSTextField(labelWithString: resetTextForTesting)
         reset.font = .systemFont(ofSize: 10.5, weight: .regular)
-        reset.textColor = NSColor.white.withAlphaComponent(0.46)
+        reset.textColor = theme.tertiaryText
         reset.alignment = .right
         reset.translatesAutoresizingMaskIntoConstraints = false
 
@@ -864,6 +960,92 @@ final class WeeklyLimitView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 }
 
+final class ActiveTaskRowView: NSView {
+    let task: ActiveTask
+    private let openHandler: () -> Void
+
+    init(task: ActiveTask, theme: NotchTheme, open: @escaping () -> Void) {
+        self.task = task
+        openHandler = open
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        layer?.cornerRadius = 12
+        layer?.cornerCurve = .continuous
+
+        let symbol: String
+        let stateText: String
+        let color: NSColor
+        switch task.state {
+        case .running:
+            symbol = "circle.dotted"
+            stateText = "Running"
+            color = theme.accent
+        case .waitingForApproval:
+            symbol = "checkmark.shield.fill"
+            stateText = "Needs approval"
+            color = .systemOrange
+        case .waitingForInput:
+            symbol = "questionmark.bubble.fill"
+            stateText = "Needs input"
+            color = .systemOrange
+        case .unavailable:
+            symbol = "wifi.slash"
+            stateText = "Connection lost"
+            color = theme.tertiaryText
+        }
+        let icon = NSImageView(image: NSImage(systemSymbolName: symbol, accessibilityDescription: stateText) ?? NSImage())
+        icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
+        icon.contentTintColor = color
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        let title = NSTextField(labelWithString: task.title)
+        title.font = .systemFont(ofSize: 14, weight: .medium)
+        title.textColor = theme.primaryText
+        title.lineBreakMode = .byTruncatingTail
+        title.translatesAutoresizingMaskIntoConstraints = false
+        title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let source = NSTextField(labelWithString: task.sourceLabel)
+        source.font = .systemFont(ofSize: 10.5, weight: .medium)
+        source.textColor = theme.secondaryText
+        source.lineBreakMode = .byTruncatingTail
+        source.translatesAutoresizingMaskIntoConstraints = false
+        let status = NSTextField(labelWithString: stateText)
+        status.font = .systemFont(ofSize: 10.5, weight: .semibold)
+        status.textColor = color
+        status.translatesAutoresizingMaskIntoConstraints = false
+        [icon, title, source, status].forEach(addSubview)
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 46),
+            icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 15),
+            icon.centerYAnchor.constraint(equalTo: centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 17),
+            title.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 12),
+            title.centerYAnchor.constraint(equalTo: centerYAnchor),
+            source.leadingAnchor.constraint(greaterThanOrEqualTo: title.trailingAnchor, constant: 12),
+            source.widthAnchor.constraint(lessThanOrEqualToConstant: 120),
+            source.centerYAnchor.constraint(equalTo: centerYAnchor),
+            status.leadingAnchor.constraint(equalTo: source.trailingAnchor, constant: 12),
+            status.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -15),
+            status.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+        toolTip = "Open active task"
+        setAccessibilityLabel("\(task.title), \(stateText), \(task.sourceLabel)")
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func mouseUp(with event: NSEvent) {
+        if bounds.contains(convert(event.locationInWindow, from: nil)) { openHandler() }
+    }
+    override func mouseEntered(with event: NSEvent) { layer?.backgroundColor = NSColor.white.withAlphaComponent(0.07).cgColor }
+    override func mouseExited(with event: NSEvent) { layer?.backgroundColor = NSColor.clear.cgColor }
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways], owner: self))
+    }
+}
+
 private struct IslandGeometry {
     let windowWidth: CGFloat
     let bodyInset: CGFloat
@@ -885,8 +1067,14 @@ final class OverlayController {
 
     private let panel: FocuslessPanel
     private let shouldReduceMotion: () -> Bool
+    private let shortcutModifierState: () -> Bool
+    private let automaticOpenAllowed: () -> Bool
     private var tasks: [CompletedTask] = []
+    private var activeTasks: [ActiveTask] = []
+    private var showsActiveTasks = ActiveTaskPreferences.shared.isVisible
     private var hideTimer: Timer?
+    private var shortcutModifierTimer: Timer?
+    private var shortcutLettersVisible = false
     private var targetScreen: NSScreen?
     private var isPinned = false
     private var currentBodyInset: CGFloat = 0
@@ -897,19 +1085,24 @@ final class OverlayController {
     private var pendingRebuild = false
     private var updateVersion: String?
     private var weeklyLimit: CodexWeeklyLimit?
+    private var remoteHealth = RemoteHostHealthSnapshot.empty
     private weak var updateButton: ClosureButton?
     private weak var settingsButton: ClosureButton?
+    private weak var remoteStatusBadge: RemoteHostStatusBadgeView?
     private weak var emptyStateView: EmptyStateView?
     private weak var weeklyLimitView: WeeklyLimitView?
     private weak var rootView: HUDContentView?
     private var rowsByEventID: [String: TaskRowView] = [:]
     private var dismissingEventIDs: Set<String> = []
+    private var themeObserver: NSObjectProtocol?
 
     var onOpen: ((CompletedTask) -> Bool)?
+    var onOpenActive: ((ActiveTask) -> Bool)?
     var onOpenFinished: ((CompletedTask) -> Void)?
     var onDismiss: ((Int) -> Void)?
     var onClear: (() -> Void)?
     var onSettings: (() -> Void)?
+    var onToggleActiveTasks: (() -> Void)?
     var onUpdate: (() -> Void)?
     var onVisibilityChanged: ((Bool) -> Void)?
     var frameForTesting: NSRect { panel.frame }
@@ -927,22 +1120,45 @@ final class OverlayController {
     var isUpdateAvailableForTesting: Bool { updateVersion != nil }
     var updateButtonForTesting: NSButton? { updateButton }
     var settingsButtonForTesting: NSButton? { settingsButton }
+    var remoteStatusTextForTesting: String? {
+        remoteHealth.hosts.isEmpty ? nil : remoteHealth.summaryText
+    }
     var hasEmptyStateForTesting: Bool { emptyStateView != nil }
     var weeklyLimitViewForTesting: WeeklyLimitView? { weeklyLimitView }
+    var taskBadgeTextsForTesting: [String] {
+        presentedTasks.compactMap { rowsByEventID[$0.eventID]?.badgeTextForTesting }
+    }
     var rowArrivalAnimationCountForTesting: Int {
         rowsByEventID.values.filter(\.hasArrivalAnimationForTesting).count
     }
     var hasContentAnimationForTesting: Bool {
         rootView?.hasContentAnimationForTesting == true
     }
-    var hasContent: Bool { !tasks.isEmpty || updateVersion != nil || weeklyLimit != nil }
+    var hasContent: Bool {
+        !tasks.isEmpty
+            || (showsActiveTasks && !activeTasks.isEmpty)
+            || updateVersion != nil
+            || weeklyLimit != nil
+    }
+    private var presentedTasks: [CompletedTask] {
+        guard showsActiveTasks, !activeTasks.isEmpty else { return tasks }
+        let activeKeys = Set(activeTasks.map { "\($0.sourceID)\u{0}\($0.threadID.lowercased())" })
+        return tasks.filter { !activeKeys.contains("\($0.sourceID)\u{0}\($0.threadID.lowercased())") }
+    }
 
     init(
+        automaticOpenAllowed: @escaping () -> Bool = { true },
         shouldReduceMotion: @escaping () -> Bool = {
             NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        },
+        shortcutModifierState: @escaping () -> Bool = {
+            let flags = CGEventSource.flagsState(.combinedSessionState)
+            return flags.contains(.maskControl) && flags.contains(.maskShift)
         }
     ) {
+        self.automaticOpenAllowed = automaticOpenAllowed
         self.shouldReduceMotion = shouldReduceMotion
+        self.shortcutModifierState = shortcutModifierState
         panel = FocuslessPanel(
             contentRect: .zero,
             styleMask: [.borderless, .nonactivatingPanel],
@@ -964,6 +1180,32 @@ final class OverlayController {
             object: nil,
             queue: .main
         ) { [weak self] _ in self?.screenParametersDidChange() }
+        themeObserver = NotificationCenter.default.addObserver(
+            forName: ThemeStore.didChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in self?.themeDidChange() }
+    }
+
+    deinit {
+        shortcutModifierTimer?.invalidate()
+        if let themeObserver { NotificationCenter.default.removeObserver(themeObserver) }
+    }
+
+    func refreshShortcutModifierStateForTesting() {
+        refreshShortcutModifierState()
+    }
+
+    private func themeDidChange() {
+        switch phase {
+        case .opening, .closing, .launching:
+            pendingRebuild = true
+        case .hidden:
+            rebuildContent(initiallyExpanded: false)
+        case .open:
+            rebuildContent(initiallyExpanded: true)
+            positionPanel()
+        }
     }
 
     func update(tasks: [CompletedTask]) {
@@ -996,6 +1238,18 @@ final class OverlayController {
         }
     }
 
+    func update(activeTasks: [ActiveTask], visible: Bool) {
+        self.activeTasks = activeTasks
+        showsActiveTasks = visible
+        switch phase {
+        case .opening, .closing, .launching: pendingRebuild = true
+        case .hidden: rebuildContent(initiallyExpanded: false)
+        case .open:
+            rebuildContent(initiallyExpanded: true)
+            positionPanel()
+        }
+    }
+
     func setUpdateAvailable(version: String?) {
         let wasAvailable = updateVersion != nil
         updateVersion = version
@@ -1015,12 +1269,24 @@ final class OverlayController {
     func setWeeklyLimit(_ limit: CodexWeeklyLimit?) {
         guard weeklyLimit != limit else { return }
         weeklyLimit = limit
-        if !hasContent, phase != .launching {
-            hide(immediately: true)
+        switch phase {
+        case .opening, .closing, .launching:
+            pendingRebuild = true
+        case .hidden:
             rebuildContent(initiallyExpanded: false)
+        case .open:
+            rebuildContent(initiallyExpanded: true)
+            positionPanel()
+        }
+    }
+
+    func setRemoteHostHealth(_ snapshot: RemoteHostHealthSnapshot) {
+        let previousIDs = remoteHealth.hosts.map(\.id)
+        remoteHealth = snapshot
+        guard previousIDs != snapshot.hosts.map(\.id) else {
+            remoteStatusBadge?.update(snapshot)
             return
         }
-
         switch phase {
         case .opening, .closing, .launching:
             pendingRebuild = true
@@ -1033,7 +1299,7 @@ final class OverlayController {
     }
 
     func showForEvent() {
-        guard hasContent else { return }
+        guard automaticOpenAllowed(), hasContent else { return }
         if phase == .hidden { targetScreen = screenUnderPointer() }
         if phase == .open || phase == .opening {
             if !isPinned { scheduleHide(after: Self.eventVisibilityDuration) }
@@ -1065,19 +1331,22 @@ final class OverlayController {
     }
 
     func openTask(at index: Int, animated: Bool = true) {
-        guard tasks.indices.contains(index) else { return }
-        openTask(tasks[index], animated: animated)
+        let visibleTasks = presentedTasks
+        guard visibleTasks.indices.contains(index) else { return }
+        openTask(visibleTasks[index], animated: animated)
     }
 
     func dismissTask(at index: Int, animated: Bool = true) {
-        guard tasks.indices.contains(index) else { return }
-        let eventID = tasks[index].eventID
+        let visibleTasks = presentedTasks
+        guard visibleTasks.indices.contains(index) else { return }
+        let eventID = visibleTasks[index].eventID
         guard animated,
               !shouldReduceMotion(),
               phase == .open,
               let row = rowsByEventID[eventID]
         else {
-            onDismiss?(index)
+            guard let storedIndex = tasks.firstIndex(where: { $0.eventID == eventID }) else { return }
+            onDismiss?(storedIndex)
             return
         }
         dismissingEventIDs.insert(eventID)
@@ -1230,14 +1499,20 @@ final class OverlayController {
         }
     }
 
+    private func openActiveTask(_ task: ActiveTask) {
+        guard onOpenActive?(task) == true else { return }
+        hide(immediately: shouldReduceMotion())
+    }
+
     private func rebuildContent(initiallyExpanded: Bool) {
+        let theme = ThemeStore.shared.activeTheme
         let screen = targetScreen ?? screenUnderPointer()
         let geometry = islandGeometry(for: screen)
         currentBodyInset = geometry.bodyInset
         currentNotchWidth = geometry.notchWidth
         currentNotchHeight = geometry.notchHeight
 
-        let root = HUDContentView()
+        let root = HUDContentView(theme: theme)
         root.bodyInset = geometry.bodyInset
         root.notchWidth = geometry.notchWidth
         root.notchHeight = geometry.notchHeight
@@ -1247,34 +1522,53 @@ final class OverlayController {
             systemSymbolName: "checkmark.circle.fill",
             accessibilityDescription: "Codex tasks ready"
         ) ?? NSImage())
-        codexIcon.contentTintColor = NSColor(calibratedRed: 0.40, green: 0.91, blue: 0.71, alpha: 1)
+        codexIcon.contentTintColor = theme.accent
         codexIcon.translatesAutoresizingMaskIntoConstraints = false
 
         let heading = NSTextField(labelWithString: "Codex")
         heading.font = .systemFont(ofSize: 13, weight: .semibold)
-        heading.textColor = NSColor.white.withAlphaComponent(0.92)
+        heading.textColor = theme.primaryText
         heading.translatesAutoresizingMaskIntoConstraints = false
 
+        let visibleActiveCount = showsActiveTasks ? activeTasks.count : 0
+        let completedTasks = presentedTasks
         let countText: String
-        if tasks.isEmpty {
+        if completedTasks.isEmpty && visibleActiveCount == 0 {
             countText = updateVersion == nil ? "Nothing waiting" : "Update ready"
+        } else if visibleActiveCount > 0 && !completedTasks.isEmpty {
+            countText = "\(visibleActiveCount) active · \(completedTasks.count) completed"
+        } else if visibleActiveCount > 0 {
+            countText = "\(visibleActiveCount) active"
         } else {
-            countText = "\(tasks.count) completed"
+            countText = "\(completedTasks.count) completed"
         }
         let count = NSTextField(labelWithString: countText)
         count.font = .systemFont(ofSize: 11, weight: .medium)
-        count.textColor = NSColor.white.withAlphaComponent(0.56)
+        count.textColor = theme.secondaryText
         count.translatesAutoresizingMaskIntoConstraints = false
 
         let toggleHint = NSTextField(labelWithString: GlobalHotKeys.toggleShortcutLabel())
         toggleHint.font = .monospacedSystemFont(ofSize: 10.5, weight: .medium)
-        toggleHint.textColor = NSColor.white.withAlphaComponent(0.52)
+        toggleHint.textColor = theme.secondaryText
         toggleHint.translatesAutoresizingMaskIntoConstraints = false
+
+        let activeToggle = ClosureButton { [weak self] in self?.onToggleActiveTasks?() }
+        activeToggle.image = NSImage(
+            systemSymbolName: showsActiveTasks ? "bolt.fill" : "bolt.slash",
+            accessibilityDescription: showsActiveTasks ? "Hide active tasks" : "Show active tasks"
+        )
+        activeToggle.contentTintColor = showsActiveTasks ? theme.accent : theme.secondaryText
+        activeToggle.title = GlobalHotKeys.activeTasksShortcutLabel()
+        activeToggle.imagePosition = .imageLeading
+        activeToggle.imageHugsTitle = true
+        activeToggle.font = .monospacedSystemFont(ofSize: 9.5, weight: .semibold)
+        activeToggle.toolTip = "\(showsActiveTasks ? "Hide" : "Show") active tasks — \(GlobalHotKeys.activeTasksShortcutLabel())"
+        activeToggle.translatesAutoresizingMaskIntoConstraints = false
 
         let clear = ClosureButton { [weak self] in self?.clearTasks() }
         clear.title = "Clear"
         clear.font = .systemFont(ofSize: 11, weight: .medium)
-        clear.contentTintColor = NSColor.white.withAlphaComponent(0.66)
+        clear.contentTintColor = theme.secondaryText
         clear.toolTip = "Dismiss all tasks"
         clear.alphaValue = 0
         clear.translatesAutoresizingMaskIntoConstraints = false
@@ -1282,8 +1576,8 @@ final class OverlayController {
             self?.openSettings()
         }
         settings.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings")
-        settings.contentTintColor = NSColor.white.withAlphaComponent(0.66)
-        settings.toolTip = "Connection settings"
+        settings.contentTintColor = theme.secondaryText
+        settings.toolTip = "Appearance and connections"
         settings.alphaValue = 0
         settings.translatesAutoresizingMaskIntoConstraints = false
         settingsButton = settings
@@ -1293,18 +1587,31 @@ final class OverlayController {
             systemSymbolName: "arrow.down.circle.fill",
             accessibilityDescription: "Install Codex Notch update"
         )
-        update.contentTintColor = NSColor(calibratedRed: 0.40, green: 0.91, blue: 0.71, alpha: 1)
+        update.contentTintColor = theme.accent
         update.toolTip = updateVersion.map { "Install Codex Notch \($0)" }
         update.translatesAutoresizingMaskIntoConstraints = false
         update.isHidden = updateVersion == nil
         updateButton = update
-        clear.isHidden = tasks.isEmpty
+        clear.isHidden = completedTasks.isEmpty
         root.controls = [clear, settings]
 
         let header = NSView()
         header.translatesAutoresizingMaskIntoConstraints = false
-        [codexIcon, heading, count, toggleHint, clear, update, settings].forEach(header.addSubview)
-        NSLayoutConstraint.activate([
+        var headerViews: [NSView] = [codexIcon, heading, count]
+        let statusBadge: RemoteHostStatusBadgeView?
+        if remoteHealth.hosts.isEmpty {
+            statusBadge = nil
+            remoteStatusBadge = nil
+        } else {
+            let badge = RemoteHostStatusBadgeView()
+            badge.update(remoteHealth)
+            statusBadge = badge
+            remoteStatusBadge = badge
+            headerViews.append(badge)
+        }
+        headerViews.append(contentsOf: [toggleHint, activeToggle, clear, update, settings])
+        headerViews.forEach(header.addSubview)
+        var headerConstraints = [
             header.heightAnchor.constraint(equalToConstant: 36),
             codexIcon.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 13),
             codexIcon.centerYAnchor.constraint(equalTo: header.centerYAnchor),
@@ -1314,20 +1621,44 @@ final class OverlayController {
             heading.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             count.leadingAnchor.constraint(equalTo: heading.trailingAnchor, constant: 8),
             count.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-            clear.leadingAnchor.constraint(greaterThanOrEqualTo: count.trailingAnchor, constant: 12),
             update.leadingAnchor.constraint(equalTo: clear.trailingAnchor, constant: 6),
             update.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             update.widthAnchor.constraint(equalToConstant: 24),
             update.heightAnchor.constraint(equalToConstant: 24),
+            activeToggle.leadingAnchor.constraint(equalTo: settings.trailingAnchor, constant: 4),
+            activeToggle.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            activeToggle.widthAnchor.constraint(equalToConstant: 65),
+            activeToggle.heightAnchor.constraint(equalToConstant: 24),
             settings.leadingAnchor.constraint(equalTo: update.trailingAnchor, constant: 4),
-            toggleHint.leadingAnchor.constraint(equalTo: settings.trailingAnchor, constant: 10),
+            toggleHint.leadingAnchor.constraint(equalTo: activeToggle.trailingAnchor, constant: 8),
             toggleHint.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -10),
             toggleHint.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             settings.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             settings.widthAnchor.constraint(equalToConstant: 24),
             settings.heightAnchor.constraint(equalToConstant: 24),
             clear.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-        ])
+        ]
+        if let statusBadge {
+            headerConstraints.append(contentsOf: [
+                statusBadge.leadingAnchor.constraint(
+                    greaterThanOrEqualTo: count.trailingAnchor,
+                    constant: 12
+                ),
+                statusBadge.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+                clear.leadingAnchor.constraint(
+                    equalTo: statusBadge.trailingAnchor,
+                    constant: 8
+                ),
+            ])
+        } else {
+            headerConstraints.append(
+                clear.leadingAnchor.constraint(
+                    greaterThanOrEqualTo: count.trailingAnchor,
+                    constant: 12
+                )
+            )
+        }
+        NSLayoutConstraint.activate(headerConstraints)
 
         let stack = NSStackView()
         stack.orientation = .vertical
@@ -1337,18 +1668,63 @@ final class OverlayController {
         stack.addArrangedSubview(header)
 
         if let weeklyLimit {
-            let limitView = WeeklyLimitView(limit: weeklyLimit)
+            let limitView = WeeklyLimitView(limit: weeklyLimit, theme: theme)
             stack.addArrangedSubview(limitView)
             limitView.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
             weeklyLimitView = limitView
         }
 
+        let displayedActiveTasks = showsActiveTasks ? Array(activeTasks.prefix(4)) : []
+        if !displayedActiveTasks.isEmpty {
+            let section = NSTextField(labelWithString: "ACTIVE")
+            section.font = .systemFont(ofSize: 9.5, weight: .bold)
+            section.textColor = theme.tertiaryText
+            section.translatesAutoresizingMaskIntoConstraints = false
+            let sectionHost = NSView()
+            sectionHost.translatesAutoresizingMaskIntoConstraints = false
+            sectionHost.addSubview(section)
+            NSLayoutConstraint.activate([
+                sectionHost.heightAnchor.constraint(equalToConstant: 22),
+                section.leadingAnchor.constraint(equalTo: sectionHost.leadingAnchor, constant: 14),
+                section.bottomAnchor.constraint(equalTo: sectionHost.bottomAnchor, constant: -3),
+            ])
+            stack.addArrangedSubview(sectionHost)
+            sectionHost.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+            for task in displayedActiveTasks {
+                let row = ActiveTaskRowView(task: task, theme: theme) { [weak self] in
+                    self?.openActiveTask(task)
+                }
+                stack.addArrangedSubview(row)
+                row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+            }
+            if activeTasks.count > displayedActiveTasks.count {
+                let remaining = NSTextField(labelWithString: "+ \(activeTasks.count - displayedActiveTasks.count) more active tasks")
+                remaining.font = .systemFont(ofSize: 10.5, weight: .medium)
+                remaining.textColor = theme.secondaryText
+                remaining.alignment = .center
+                remaining.translatesAutoresizingMaskIntoConstraints = false
+                remaining.heightAnchor.constraint(equalToConstant: 24).isActive = true
+                stack.addArrangedSubview(remaining)
+                remaining.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+            }
+        }
+
+        if !completedTasks.isEmpty && !displayedActiveTasks.isEmpty {
+            let section = NSTextField(labelWithString: "COMPLETED")
+            section.font = .systemFont(ofSize: 9.5, weight: .bold)
+            section.textColor = theme.tertiaryText
+            section.translatesAutoresizingMaskIntoConstraints = false
+            section.heightAnchor.constraint(equalToConstant: 20).isActive = true
+            stack.addArrangedSubview(section)
+        }
+
         var rows: [TaskRowView] = []
         var rowLookup: [String: TaskRowView] = [:]
-        for (index, task) in tasks.enumerated() {
+        for (index, task) in completedTasks.enumerated() {
             let row = TaskRowView(
                 task: task,
                 index: index,
+                theme: theme,
                 shouldReduceMotion: shouldReduceMotion,
                 open: { [weak self] in self?.openTask(task) },
                 dismiss: { [weak self] in self?.dismissTask(at: index) }
@@ -1356,13 +1732,14 @@ final class OverlayController {
             if dismissingEventIDs.contains(task.eventID) {
                 row.holdInvisibleForPendingDismissal()
             }
+            row.setShortcutLetterVisible(shortcutLettersVisible)
             rows.append(row)
             rowLookup[task.eventID] = row
             stack.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
-        if tasks.isEmpty {
-            let emptyState = EmptyStateView(updateVersion: updateVersion)
+        if completedTasks.isEmpty && displayedActiveTasks.isEmpty {
+            let emptyState = EmptyStateView(updateVersion: updateVersion, theme: theme)
             stack.addArrangedSubview(emptyState)
             emptyState.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
             emptyStateView = emptyState
@@ -1392,7 +1769,11 @@ final class OverlayController {
         root.configureMotion(contentHost: stack, header: header, rows: rows)
 
         panel.contentView = root
-        let contentHeight: CGFloat = tasks.isEmpty ? 168 : 62 + CGFloat(tasks.count * 48)
+        let activeHeight = displayedActiveTasks.isEmpty ? 0 : 22 + displayedActiveTasks.count * 48 + (activeTasks.count > displayedActiveTasks.count ? 24 : 0)
+        let completedSectionHeight = !completedTasks.isEmpty && !displayedActiveTasks.isEmpty ? 20 : 0
+        let contentHeight: CGFloat = completedTasks.isEmpty && displayedActiveTasks.isEmpty
+            ? 168
+            : 62 + CGFloat(completedTasks.count * 48 + activeHeight + completedSectionHeight)
         let weeklyLimitHeight: CGFloat = weeklyLimit == nil ? 0 : 32
         let height = geometry.notchHeight + contentHeight + weeklyLimitHeight
         let size = NSSize(width: geometry.windowWidth, height: height)
@@ -1419,13 +1800,45 @@ final class OverlayController {
     private func orderPanelFront() {
         let wasVisible = panel.isVisible
         panel.orderFrontRegardless()
-        if !wasVisible { onVisibilityChanged?(true) }
+        if !wasVisible {
+            startShortcutModifierMonitoring()
+            onVisibilityChanged?(true)
+        }
     }
 
     private func orderPanelOut() {
         let wasVisible = panel.isVisible
         panel.orderOut(nil)
-        if wasVisible { onVisibilityChanged?(false) }
+        if wasVisible {
+            stopShortcutModifierMonitoring()
+            onVisibilityChanged?(false)
+        }
+    }
+
+    private func startShortcutModifierMonitoring() {
+        refreshShortcutModifierState()
+        guard shortcutModifierTimer == nil else { return }
+        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
+            self?.refreshShortcutModifierState()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        shortcutModifierTimer = timer
+    }
+
+    private func stopShortcutModifierMonitoring() {
+        shortcutModifierTimer?.invalidate()
+        shortcutModifierTimer = nil
+        setShortcutLettersVisible(false)
+    }
+
+    private func refreshShortcutModifierState() {
+        setShortcutLettersVisible(shortcutModifierState())
+    }
+
+    private func setShortcutLettersVisible(_ visible: Bool) {
+        guard shortcutLettersVisible != visible else { return }
+        shortcutLettersVisible = visible
+        rowsByEventID.values.forEach { $0.setShortcutLetterVisible(visible) }
     }
 
     private func screenFrame(_ row: TaskRowView) -> NSRect {

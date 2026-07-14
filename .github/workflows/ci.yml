@@ -15,13 +15,14 @@ jobs:
         run: |
           for script in *.sh; do sh -n "$script"; done
       - name: Compile Python
-        run: python3 -m py_compile remote/codex_notch_remote.py
+        run: python3 -m py_compile remote/codex_notch_remote.py remote/codex_notch_live.py
 
   macos:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v7
       - name: Test Swift package
+        timeout-minutes: 5
         run: swift test
       - name: Build app bundle
         run: ./build-macos-app.sh

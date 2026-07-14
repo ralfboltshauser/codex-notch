@@ -30,7 +30,7 @@ enum NotificationSound: String, CaseIterable, Equatable {
         switch self {
         case .glassDrop: return "Crisp, luminous, and precise"
         case .softPulse: return "Warm, rounded, and understated"
-        case .aurora: return "Airy with an upward shimmer"
+        case .aurora: return "Airy with a delicate upward shimmer"
         case .pebble: return "Tiny, tactile, and organic"
         case .halo: return "A calm two-note resolve"
         case .prism: return "Liquid, bright, and futuristic"
@@ -97,6 +97,7 @@ final class NotificationSoundCardButton: NSButton {
     let notificationSound: NotificationSound
     var onSelect: ((NotificationSound) -> Void)?
 
+    private let theme: NotchTheme
     private let icon: NSImageView
     private let nameLabel: NSTextField
     private let detailLabel: NSTextField
@@ -105,8 +106,9 @@ final class NotificationSoundCardButton: NSButton {
     private var hovering = false
     private var selectedSound = false
 
-    init(sound: NotificationSound) {
+    init(sound: NotificationSound, theme: NotchTheme) {
         notificationSound = sound
+        self.theme = theme
         icon = NSImageView(image: NSImage(
             systemSymbolName: sound == .none ? "speaker.slash.fill" : "waveform",
             accessibilityDescription: nil
@@ -123,18 +125,17 @@ final class NotificationSoundCardButton: NSButton {
         isBordered = false
         focusRingType = .default
         wantsLayer = true
-        layer?.cornerRadius = 11
+        layer?.cornerRadius = 12
         layer?.cornerCurve = .continuous
         layer?.borderWidth = 1
 
-        let accent = NSColor(calibratedRed: 0.40, green: 0.91, blue: 0.71, alpha: 1)
-        icon.contentTintColor = accent
+        icon.contentTintColor = theme.accent
         nameLabel.font = .systemFont(ofSize: 12.5, weight: .semibold)
-        nameLabel.textColor = NSColor.white.withAlphaComponent(0.94)
+        nameLabel.textColor = theme.primaryText
         detailLabel.font = .systemFont(ofSize: 10.5, weight: .regular)
-        detailLabel.textColor = NSColor.white.withAlphaComponent(0.48)
+        detailLabel.textColor = theme.secondaryText
         detailLabel.lineBreakMode = .byTruncatingTail
-        selectedIcon.contentTintColor = accent
+        selectedIcon.contentTintColor = theme.accent
 
         [icon, nameLabel, detailLabel, selectedIcon].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
@@ -199,20 +200,15 @@ final class NotificationSoundCardButton: NSButton {
     @objc private func chooseSound() { onSelect?(notificationSound) }
 
     private func updateAppearance() {
-        let accent = NSColor(calibratedRed: 0.40, green: 0.91, blue: 0.71, alpha: 1)
         CATransaction.begin()
         CATransaction.setAnimationDuration(0.12)
         CATransaction.setAnimationTimingFunction(NotchMotion.ease)
         layer?.backgroundColor = (
-            selectedSound
-                ? accent.withAlphaComponent(0.12)
-                : NSColor.white.withAlphaComponent(hovering ? 0.09 : 0.055)
+            selectedSound ? theme.surface : (hovering ? theme.hoverSurface : theme.quietSurface)
         ).cgColor
-        layer?.borderColor = (
-            selectedSound
-                ? accent.withAlphaComponent(0.74)
-                : NSColor.white.withAlphaComponent(hovering ? 0.18 : 0.08)
-        ).cgColor
+        layer?.borderColor = selectedSound
+            ? theme.accent.withAlphaComponent(0.74).cgColor
+            : (hovering ? theme.accent.withAlphaComponent(0.34) : theme.border).cgColor
         CATransaction.commit()
     }
 }
