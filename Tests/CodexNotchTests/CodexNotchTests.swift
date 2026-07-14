@@ -188,11 +188,7 @@ final class CodexNotchTests: XCTestCase {
         overlay.toggle()
         overlay.openTask(at: 0)
         XCTAssertEqual(activated, task)
-        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
-            XCTAssertFalse(overlay.isLaunchingForTesting)
-        } else {
-            XCTAssertTrue(overlay.isLaunchingForTesting)
-        }
+        XCTAssertTrue(overlay.isLaunchingForTesting)
         wait(for: [finished], timeout: 1)
         XCTAssertFalse(overlay.isVisibleForTesting)
     }
