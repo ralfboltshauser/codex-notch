@@ -189,6 +189,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             _ = try? self?.startRemoteListener()
             self?.scheduleRemoteCatchUp()
         }
+        onboarding?.onCheckForUpdates = { [weak self] in
+            self?.updater.checkForUpdates()
+        }
         onboarding?.onUninstall = { [weak self] completion in
             self?.uninstall(completion: completion)
         }

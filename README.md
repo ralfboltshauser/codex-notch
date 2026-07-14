@@ -89,6 +89,9 @@ Under **Settings → Sounds**, choose from six short completion tones or select
 Sounds play only for newly accepted local or remote Stop-hook events; opening the
 notch manually stays quiet.
 
+Choose **Check for Updates** at the bottom of Settings to ask Sparkle for the
+latest signed release immediately.
+
 To remove Codex Notch, open **Connections** and choose **Uninstall Codex Notch…**.
 The app first removes and verifies its hooks, retry services, configuration, and
 queued events on every paired Ubuntu host. It then removes the local hook and

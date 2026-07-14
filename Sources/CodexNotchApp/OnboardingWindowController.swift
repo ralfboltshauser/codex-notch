@@ -41,22 +41,28 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
     private let pairings: PairingStore
     private let pairer: RemoteHostPairer
     private let notificationSounds: NotificationSoundPlayer
+    private let isHookInstalled: () -> Bool
     private let shouldReduceMotion: () -> Bool
     private let root = NSVisualEffectView()
     private let content = NSView()
     private let hostField = NSTextField()
     private let statusLabel = NSTextField(labelWithString: "")
+    private weak var checkForUpdatesButton: ClosureButton?
     private var working = false
     private var contentTransitionID = 0
     private var selectedPage: SettingsPage = .connections
 
     var onConnectionsChanged: (() -> Void)?
+    var onCheckForUpdates: (() -> Void)?
     var onUninstall: ((@escaping (Result<Void, Error>) -> Void) -> Void)?
+
+    var checkForUpdatesButtonForTesting: NSButton? { checkForUpdatesButton }
 
     init(
         pairings: PairingStore,
         pairer: RemoteHostPairer,
         notificationSounds: NotificationSoundPlayer = NotificationSoundPlayer(),
+        isHookInstalled: @escaping () -> Bool = { CodexHookInstaller().isInstalled },
         shouldReduceMotion: @escaping () -> Bool = {
             NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         }
@@ -64,6 +70,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         self.pairings = pairings
         self.pairer = pairer
         self.notificationSounds = notificationSounds
+        self.isHookInstalled = isHookInstalled
         self.shouldReduceMotion = shouldReduceMotion
         let window = SettingsWindow(
             contentRect: NSRect(x: 0, y: 0, width: 680, height: 620),
@@ -108,7 +115,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
     }
 
     private func showAppropriateStep() {
-        if CodexHookInstaller().isInstalled {
+        if isHookInstalled() {
             buildSettingsPage(selectedPage)
         } else {
             buildLocalSetup()
@@ -421,8 +428,17 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         )
         context.maximumNumberOfLines = 2
 
+        let done = ClosureButton { [weak self] in self?.close() }
+        done.title = "Done"
+        styleSecondaryButton(done)
+        let checkForUpdates = makeCheckForUpdatesButton()
+        let footer = NSStackView(views: [makeVersionLabel(), checkForUpdates, NSView(), done])
+        footer.orientation = .horizontal
+        footer.alignment = .centerY
+        footer.spacing = 12
+
         let stack = NSStackView(
-            views: [header, title, subtitle, sectionHeader, grid, silent, context]
+            views: [header, title, subtitle, sectionHeader, grid, silent, context, footer]
         )
         configureStack(stack)
         stack.spacing = 0
@@ -432,6 +448,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         stack.setCustomSpacing(8, after: sectionHeader)
         stack.setCustomSpacing(10, after: grid)
         stack.setCustomSpacing(16, after: silent)
+        stack.setCustomSpacing(20, after: context)
         content.addSubview(stack)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: content.leadingAnchor),
@@ -444,6 +461,11 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
             silent.widthAnchor.constraint(equalTo: stack.widthAnchor),
             silent.heightAnchor.constraint(equalToConstant: 54),
             context.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            footer.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            checkForUpdates.widthAnchor.constraint(equalToConstant: 148),
+            checkForUpdates.heightAnchor.constraint(equalToConstant: 40),
+            done.widthAnchor.constraint(equalToConstant: 96),
+            done.heightAnchor.constraint(equalToConstant: 40),
         ])
     }
 
@@ -502,7 +524,8 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         let uninstall = makeUninstallButton()
         let spacer = NSView()
         let version = makeVersionLabel()
-        let footer = NSStackView(views: [uninstall, spacer, version, done])
+        let checkForUpdates = makeCheckForUpdatesButton()
+        let footer = NSStackView(views: [uninstall, spacer, version, checkForUpdates, done])
         footer.orientation = .horizontal
         footer.alignment = .centerY
         footer.spacing = 12
@@ -535,6 +558,8 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
             footer.widthAnchor.constraint(equalTo: stack.widthAnchor),
             uninstall.widthAnchor.constraint(equalToConstant: 172),
             uninstall.heightAnchor.constraint(equalToConstant: 40),
+            checkForUpdates.widthAnchor.constraint(equalToConstant: 148),
+            checkForUpdates.heightAnchor.constraint(equalToConstant: 40),
             done.widthAnchor.constraint(equalToConstant: 96),
             done.heightAnchor.constraint(equalToConstant: 40),
         ])
@@ -745,6 +770,22 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         )
         label.toolTip = "Installed Codex Notch version"
         return label
+    }
+
+    private func makeCheckForUpdatesButton() -> ClosureButton {
+        let button = ClosureButton { [weak self] in
+            self?.onCheckForUpdates?()
+        }
+        button.title = "Check for Updates"
+        button.image = NSImage(
+            systemSymbolName: "arrow.triangle.2.circlepath",
+            accessibilityDescription: "Check for Codex Notch updates"
+        )
+        button.imagePosition = .imageLeading
+        button.toolTip = "Check for a newer version of Codex Notch"
+        styleSecondaryButton(button)
+        checkForUpdatesButton = button
+        return button
     }
 
     private func stylePrimaryButton(_ button: ClosureButton) {
