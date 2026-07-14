@@ -189,8 +189,9 @@ struct CodexHookInstaller {
 
     private func isOwnedHandler(_ handler: [String: Any]) -> Bool {
         if isCurrentHandler(handler) { return true }
-        guard let command = handler["command"] as? String,
-              command.contains(Self.legacyMarker) else { return false }
+        guard let command = handler["command"] as? String else { return false }
+        if command.contains(Self.marker) { return true }
+        guard command.contains(Self.legacyMarker) else { return false }
         let status = handler["statusMessage"] as? String
         return command.contains("Ntfy Codex Overlay.app")
             || command.contains("NtfyCodexOverlay")

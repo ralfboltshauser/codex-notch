@@ -351,8 +351,14 @@ final class CodexNotchTests: XCTestCase {
             codexHome: directory.appendingPathComponent("codex-home"),
             temporaryDirectory: directory
         )
-        XCTAssertTrue(paths.contains(directory.appendingPathComponent("codex-home/app-server-control/app-server-control.sock").path))
-        XCTAssertTrue(paths.contains(socket.path))
+        let canonicalPaths = Set(paths.map {
+            URL(fileURLWithPath: $0).resolvingSymlinksInPath().path
+        })
+        XCTAssertTrue(canonicalPaths.contains(
+            directory.appendingPathComponent("codex-home/app-server-control/app-server-control.sock")
+                .resolvingSymlinksInPath().path
+        ))
+        XCTAssertTrue(canonicalPaths.contains(socket.resolvingSymlinksInPath().path))
     }
 
     func testNotificationSoundCatalogContainsSixBundledChoicesAndSilence() throws {
@@ -1196,15 +1202,16 @@ final class CodexNotchTests: XCTestCase {
         let pairedAcknowledgement = try socketRoundTrip(pairedPayload, port: port.rawValue)
         XCTAssertEqual(pairedAcknowledgement.status, "pong")
 
+        let snapshotTimestamp = Date(timeIntervalSince1970: 1_784_035_200)
         let snapshot = ActiveTaskSnapshot(
             generation: UUID().uuidString.lowercased(),
             sequence: 1,
-            generatedAt: Date(),
+            generatedAt: snapshotTimestamp,
             tasks: [ActiveTaskEvent(
                 threadID: threadID,
                 title: "Running remotely",
                 state: .running,
-                updatedAt: Date()
+                updatedAt: snapshotTimestamp
             )]
         )
         let snapshotObject = try XCTUnwrap(
