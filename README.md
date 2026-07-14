@@ -61,6 +61,20 @@ To add Ubuntu, enter its SSH alias in **Connections** and choose **Pair**. The
 app opens a remote Codex session so you can review and trust `Queueing completion
 for Codex Notch` there as well.
 
+### Nerd shortcuts
+
+These global shortcuts follow the Swiss German keyboard layout. Hold
+<kbd>Control</kbd>+<kbd>Shift</kbd>, then press:
+
+| Key | Action |
+| --- | --- |
+| `H` | Toggle the notch |
+| `J`, `K`, `L`, `Ö` | Open tasks 1–4 |
+| `U`, `I`, `O`, `P` | Open tasks 5–8 |
+| `N`, `M` | Open tasks 9–10 |
+
+The existing number-key shortcuts remain available.
+
 To remove Codex Notch, open **Connections** and choose **Uninstall Codex Notch…**.
 The app first removes and verifies its hooks, retry services, configuration, and
 queued events on every paired Ubuntu host. It then removes the local hook and
@@ -153,11 +167,11 @@ copy is stored outside Git at
 To publish a release after the Apple secrets are configured:
 
 ```sh
-./prepare-release.sh 0.3.4
+./prepare-release.sh 0.3.5
 git add AppResources/Info.plist
-git commit -m 'Prepare 0.3.4 release'
-git tag v0.3.4
-git push origin main v0.3.4
+git commit -m 'Prepare 0.3.5 release'
+git tag v0.3.5
+git push origin main v0.3.5
 ```
 
 The tag workflow builds and signs the complete app, notarizes and staples it,

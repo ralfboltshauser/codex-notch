@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import CodexNotchCore
 import Darwin
 import Network
@@ -131,25 +132,44 @@ final class CodexNotchTests: XCTestCase {
         XCTAssertEqual(commands, ["/other --codex-hook"])
     }
 
-    func testTaskStorePersistsLatestNineAndDeduplicates() throws {
+    func testTaskStorePersistsLatestTenAndDeduplicates() throws {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let file = directory.appendingPathComponent("tasks.json")
         let store = TaskStore(fileURL: file)
-        for index in 0..<10 {
+        for index in 0..<11 {
             let id = String(format: "%012d", index)
             let task = CompletedTask(
-                eventID: String(repeating: String(index % 10), count: 64),
+                eventID: String(format: "%064x", index),
                 title: "Task \(index)",
                 url: URL(string: "codex://threads/00000000-0000-0000-0000-\(id)")!,
                 receivedAt: Date(timeIntervalSince1970: TimeInterval(1_700_000_000 + index))
             )
             XCTAssertTrue(try store.add(task))
         }
-        XCTAssertEqual(store.tasks.count, 9)
-        XCTAssertEqual(store.tasks.first?.title, "Task 9")
+        XCTAssertEqual(store.tasks.count, 10)
+        XCTAssertEqual(store.tasks.first?.title, "Task 10")
         XCTAssertFalse(try store.add(store.tasks[0]))
         XCTAssertEqual(TaskStore(fileURL: file).tasks, store.tasks)
+    }
+
+    func testNerdShortcutsUseSwissKeyboardLayoutAndOpenTenSlots() {
+        XCTAssertEqual(
+            GlobalHotKeys.nerdBindings.map(\.keyLabel),
+            ["H", "J", "K", "L", "Ö", "U", "I", "O", "P", "N", "M"]
+        )
+        XCTAssertEqual(
+            GlobalHotKeys.nerdBindings.map(\.action),
+            [.toggle] + (0..<10).map { .open($0) }
+        )
+        XCTAssertEqual(
+            GlobalHotKeys.nerdBindings[4].keyCode,
+            UInt32(kVK_ANSI_Semicolon)
+        )
+        XCTAssertEqual(GlobalHotKeys.toggleShortcutLabel(), "⌃⇧H")
+        XCTAssertEqual(GlobalHotKeys.openShortcutLabel(at: 9), "⌃⇧M")
+        XCTAssertEqual(GlobalHotKeys.action(forHotKeyID: 310), .open(9))
+        XCTAssertEqual(GlobalHotKeys.action(forHotKeyID: 210), .dismiss(9))
     }
 
     func testRemoteEnvelopeAndAcknowledgementUseProtocolV1() throws {
