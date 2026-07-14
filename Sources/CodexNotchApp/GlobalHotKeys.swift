@@ -6,6 +6,7 @@ final class GlobalHotKeys {
         case toggle
         case open(Int)
         case dismiss(Int)
+        case settings
     }
 
     struct NerdBinding: Equatable {
@@ -48,8 +49,10 @@ final class GlobalHotKeys {
     private let handler: (Action) -> Void
     private var eventHandler: EventHandlerRef?
     private var registrations: [EventHotKeyRef] = []
+    private var settingsRegistration: EventHotKeyRef?
     private let signature: OSType = 0x4E_4F_54_43 // NOTC
     private static let nerdIDBase: UInt32 = 300
+    private static let settingsID: UInt32 = 400
 
     init(handler: @escaping (Action) -> Void) {
         self.handler = handler
@@ -59,7 +62,23 @@ final class GlobalHotKeys {
 
     deinit {
         registrations.forEach { _ = UnregisterEventHotKey($0) }
+        if let settingsRegistration { _ = UnregisterEventHotKey(settingsRegistration) }
         if let eventHandler { RemoveEventHandler(eventHandler) }
+    }
+
+    func setSettingsShortcutEnabled(_ enabled: Bool) {
+        if enabled {
+            guard settingsRegistration == nil else { return }
+            settingsRegistration = register(
+                keyCode: UInt32(kVK_ANSI_Comma),
+                modifiers: UInt32(cmdKey),
+                id: Self.settingsID,
+                persists: false
+            )
+        } else if let settingsRegistration {
+            _ = UnregisterEventHotKey(settingsRegistration)
+            self.settingsRegistration = nil
+        }
     }
 
     private func installHandler() {
@@ -117,7 +136,13 @@ final class GlobalHotKeys {
         }
     }
 
-    private func register(keyCode: UInt32, modifiers: UInt32, id: UInt32) {
+    @discardableResult
+    private func register(
+        keyCode: UInt32,
+        modifiers: UInt32,
+        id: UInt32,
+        persists: Bool = true
+    ) -> EventHotKeyRef? {
         var reference: EventHotKeyRef?
         let hotKeyID = EventHotKeyID(signature: signature, id: id)
         let status = RegisterEventHotKey(
@@ -129,9 +154,11 @@ final class GlobalHotKeys {
             &reference
         )
         if status == noErr, let reference {
-            registrations.append(reference)
+            if persists { registrations.append(reference) }
+            return reference
         } else {
             NSLog("Could not register global shortcut id %d (status %d)", id, status)
+            return nil
         }
     }
 
@@ -144,6 +171,7 @@ final class GlobalHotKeys {
         case 100: return .toggle
         case 1...9: return .open(Int(id - 1))
         case 201...210: return .dismiss(Int(id - 201))
+        case settingsID: return .settings
         default: return nil
         }
     }

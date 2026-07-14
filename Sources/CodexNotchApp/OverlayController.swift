@@ -388,6 +388,78 @@ final class NumberBadgeView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 }
 
+final class EmptyStateView: NSView {
+    init(updateVersion: String?) {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+
+        let iconWell = NSView()
+        iconWell.translatesAutoresizingMaskIntoConstraints = false
+        iconWell.wantsLayer = true
+        iconWell.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.055).cgColor
+        iconWell.layer?.borderColor = NSColor.white.withAlphaComponent(0.075).cgColor
+        iconWell.layer?.borderWidth = 1
+        iconWell.layer?.cornerRadius = 18
+        iconWell.layer?.cornerCurve = .continuous
+
+        let symbolName = updateVersion == nil ? "checkmark" : "arrow.down"
+        let symbolDescription = updateVersion == nil ? "No completed tasks" : "Update ready"
+        let icon = NSImageView(image: NSImage(
+            systemSymbolName: symbolName,
+            accessibilityDescription: symbolDescription
+        ) ?? NSImage())
+        icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
+        icon.contentTintColor = NSColor(
+            calibratedRed: 0.40,
+            green: 0.91,
+            blue: 0.71,
+            alpha: 1
+        )
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        iconWell.addSubview(icon)
+
+        let title = NSTextField(labelWithString: updateVersion == nil ? "All clear" : "Update ready")
+        title.font = .systemFont(ofSize: 13, weight: .medium)
+        title.textColor = NSColor.white.withAlphaComponent(0.88)
+        title.alignment = .center
+
+        let detailText = updateVersion.map { "Codex Notch \($0) is ready to install." }
+            ?? "Completed Codex tasks will appear here."
+        let detail = NSTextField(labelWithString: detailText)
+        detail.font = .systemFont(ofSize: 11.5, weight: .regular)
+        detail.textColor = NSColor.white.withAlphaComponent(0.45)
+        detail.alignment = .center
+
+        let settingsHint = NSTextField(labelWithString: "⌘,  Settings")
+        settingsHint.font = .monospacedSystemFont(ofSize: 10.5, weight: .medium)
+        settingsHint.textColor = NSColor.white.withAlphaComponent(0.34)
+        settingsHint.alignment = .center
+
+        let stack = NSStackView(views: [iconWell, title, detail, settingsHint])
+        stack.orientation = .vertical
+        stack.alignment = .centerX
+        stack.spacing = 4
+        stack.setCustomSpacing(8, after: iconWell)
+        stack.setCustomSpacing(9, after: detail)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 104),
+            iconWell.widthAnchor.constraint(equalToConstant: 36),
+            iconWell.heightAnchor.constraint(equalToConstant: 36),
+            icon.centerXAnchor.constraint(equalTo: iconWell.centerXAnchor),
+            icon.centerYAnchor.constraint(equalTo: iconWell.centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 16),
+            icon.heightAnchor.constraint(equalToConstant: 16),
+            stack.centerXAnchor.constraint(equalTo: centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -2),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+}
+
 final class TaskRowView: NSView {
     let task: CompletedTask
 
@@ -748,6 +820,7 @@ final class OverlayController {
     private var updateVersion: String?
     private weak var updateButton: ClosureButton?
     private weak var settingsButton: ClosureButton?
+    private weak var emptyStateView: EmptyStateView?
     private weak var rootView: HUDContentView?
     private var rowsByEventID: [String: TaskRowView] = [:]
     private var dismissingEventIDs: Set<String> = []
@@ -758,6 +831,7 @@ final class OverlayController {
     var onClear: (() -> Void)?
     var onSettings: (() -> Void)?
     var onUpdate: (() -> Void)?
+    var onVisibilityChanged: ((Bool) -> Void)?
     var frameForTesting: NSRect { panel.frame }
     var bodyHeightForTesting: CGFloat { panel.frame.height }
     var bodyWidthForTesting: CGFloat { panel.frame.width - currentBodyInset * 2 }
@@ -773,6 +847,7 @@ final class OverlayController {
     var isUpdateAvailableForTesting: Bool { updateVersion != nil }
     var updateButtonForTesting: NSButton? { updateButton }
     var settingsButtonForTesting: NSButton? { settingsButton }
+    var hasEmptyStateForTesting: Bool { emptyStateView != nil }
     var rowArrivalAnimationCountForTesting: Int {
         rowsByEventID.values.filter(\.hasArrivalAnimationForTesting).count
     }
@@ -817,11 +892,6 @@ final class OverlayController {
             .map(\.eventID)
             .filter { !previousEventIDs.contains($0) }
         self.tasks = tasks
-        if !hasContent, phase != .launching {
-            hide(immediately: true)
-            rebuildContent(initiallyExpanded: false)
-            return
-        }
         switch phase {
         case .opening, .closing, .launching:
             pendingRebuild = true
@@ -848,12 +918,6 @@ final class OverlayController {
     func setUpdateAvailable(version: String?) {
         let wasAvailable = updateVersion != nil
         updateVersion = version
-        if !hasContent, phase != .launching {
-            hide(immediately: true)
-            rebuildContent(initiallyExpanded: false)
-            return
-        }
-
         switch phase {
         case .opening, .closing, .launching:
             pendingRebuild = true
@@ -891,6 +955,12 @@ final class OverlayController {
         case .opening, .open:
             hide(immediately: true)
         }
+    }
+
+    func openSettings() {
+        guard panel.isVisible else { return }
+        hide(immediately: true)
+        onSettings?()
     }
 
     func openTask(at index: Int, animated: Bool = true) {
@@ -947,7 +1017,7 @@ final class OverlayController {
 
         if immediately {
             rootView?.setInitialState(expanded: false)
-            panel.orderOut(nil)
+            orderPanelOut()
             phase = .hidden
             finishPendingRebuild(expanded: false)
             return
@@ -964,7 +1034,7 @@ final class OverlayController {
                 deadline: .now() + NotchMotion.reducedMotionFadeDuration
             ) { [weak self] in
                 guard let self, self.transitionID == hidingTransitionID else { return }
-                self.panel.orderOut(nil)
+                self.orderPanelOut()
                 self.phase = .hidden
                 self.rootView?.setInitialState(expanded: false)
                 self.finishPendingRebuild(expanded: false)
@@ -976,14 +1046,13 @@ final class OverlayController {
         rootView?.animateExpansion(expanded: false, duration: NotchMotion.closeDuration)
         DispatchQueue.main.asyncAfter(deadline: .now() + NotchMotion.closeDuration) { [weak self] in
             guard let self, self.transitionID == hidingTransitionID else { return }
-            self.panel.orderOut(nil)
+            self.orderPanelOut()
             self.phase = .hidden
             self.finishPendingRebuild(expanded: false)
         }
     }
 
     private func present(autoHide: Bool, duration: TimeInterval) {
-        guard hasContent else { return }
         if phase == .open || phase == .opening {
             if autoHide { scheduleHide(after: Self.eventVisibilityDuration) }
             return
@@ -1000,7 +1069,7 @@ final class OverlayController {
         let shouldAnimateSpatially = duration > 0 && !reduceMotion
         let shouldFade = duration > 0 && reduceMotion
         if wasHidden && shouldFade { rootView?.prepareReducedMotionOpen() }
-        if wasHidden { panel.orderFrontRegardless() }
+        if wasHidden { orderPanelFront() }
 
         phase = .opening
         if shouldAnimateSpatially {
@@ -1036,7 +1105,7 @@ final class OverlayController {
             transitionID &+= 1
             hideTimer?.invalidate()
             isPinned = false
-            if panel.isVisible { panel.orderOut(nil) }
+            if panel.isVisible { orderPanelOut() }
             phase = .hidden
             pendingRebuild = false
             onOpenFinished?(task)
@@ -1053,7 +1122,7 @@ final class OverlayController {
         rootView?.animateExpansion(expanded: false, duration: NotchMotion.launchDuration)
         DispatchQueue.main.asyncAfter(deadline: .now() + NotchMotion.launchDuration) { [weak self] in
             guard let self, self.transitionID == launchTransitionID else { return }
-            self.panel.orderOut(nil)
+            self.orderPanelOut()
             self.phase = .hidden
             self.pendingRebuild = false
             self.onOpenFinished?(task)
@@ -1085,9 +1154,12 @@ final class OverlayController {
         heading.textColor = NSColor.white.withAlphaComponent(0.92)
         heading.translatesAutoresizingMaskIntoConstraints = false
 
-        let countText = tasks.isEmpty && updateVersion != nil
-            ? "Update ready"
-            : "\(tasks.count) completed"
+        let countText: String
+        if tasks.isEmpty {
+            countText = updateVersion == nil ? "Nothing waiting" : "Update ready"
+        } else {
+            countText = "\(tasks.count) completed"
+        }
         let count = NSTextField(labelWithString: countText)
         count.font = .systemFont(ofSize: 11, weight: .medium)
         count.textColor = NSColor.white.withAlphaComponent(0.56)
@@ -1106,9 +1178,7 @@ final class OverlayController {
         clear.alphaValue = 0
         clear.translatesAutoresizingMaskIntoConstraints = false
         let settings = ClosureButton { [weak self] in
-            guard let self else { return }
-            self.hide(immediately: true)
-            self.onSettings?()
+            self?.openSettings()
         }
         settings.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings")
         settings.contentTintColor = NSColor.white.withAlphaComponent(0.66)
@@ -1183,6 +1253,12 @@ final class OverlayController {
             stack.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
+        if tasks.isEmpty {
+            let emptyState = EmptyStateView(updateVersion: updateVersion)
+            stack.addArrangedSubview(emptyState)
+            emptyState.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+            emptyStateView = emptyState
+        }
 
         root.addSubview(stack)
         let contentTopInset = geometry.notchHeight + 18
@@ -1208,7 +1284,8 @@ final class OverlayController {
         root.configureMotion(contentHost: stack, header: header, rows: rows)
 
         panel.contentView = root
-        let height = geometry.notchHeight + 62 + CGFloat(tasks.count * 48)
+        let contentHeight: CGFloat = tasks.isEmpty ? 168 : 62 + CGFloat(tasks.count * 48)
+        let height = geometry.notchHeight + contentHeight
         let size = NSSize(width: geometry.windowWidth, height: height)
         panel.contentMinSize = size
         panel.contentMaxSize = size
@@ -1228,6 +1305,18 @@ final class OverlayController {
 
     private func positionPanel() {
         panel.setFrameOrigin(visibleOrigin())
+    }
+
+    private func orderPanelFront() {
+        let wasVisible = panel.isVisible
+        panel.orderFrontRegardless()
+        if !wasVisible { onVisibilityChanged?(true) }
+    }
+
+    private func orderPanelOut() {
+        let wasVisible = panel.isVisible
+        panel.orderOut(nil)
+        if wasVisible { onVisibilityChanged?(false) }
     }
 
     private func screenFrame(_ row: TaskRowView) -> NSRect {

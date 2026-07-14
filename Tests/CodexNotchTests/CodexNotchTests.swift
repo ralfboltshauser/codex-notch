@@ -170,6 +170,7 @@ final class CodexNotchTests: XCTestCase {
         XCTAssertEqual(GlobalHotKeys.openShortcutLabel(at: 9), "⌃⇧M")
         XCTAssertEqual(GlobalHotKeys.action(forHotKeyID: 310), .open(9))
         XCTAssertEqual(GlobalHotKeys.action(forHotKeyID: 210), .dismiss(9))
+        XCTAssertEqual(GlobalHotKeys.action(forHotKeyID: 400), .settings)
     }
 
     func testRemoteEnvelopeAndAcknowledgementUseProtocolV1() throws {
@@ -464,6 +465,32 @@ final class CodexNotchTests: XCTestCase {
         overlay.setUpdateAvailable(version: nil)
         XCTAssertFalse(overlay.hasContent)
         overlay.hide(immediately: true)
+    }
+
+    func testEmptyOverlayCanBeToggledAndShowsEmptyState() {
+        _ = NSApplication.shared
+        let overlay = OverlayController()
+
+        XCTAssertFalse(overlay.hasContent)
+        overlay.toggle()
+
+        XCTAssertTrue(overlay.isVisibleForTesting)
+        XCTAssertTrue(overlay.isPinnedForTesting)
+        XCTAssertGreaterThan(overlay.bodyHeightForTesting, overlay.notchHeightForTesting + 100)
+        XCTAssertTrue(overlay.hasEmptyStateForTesting)
+        overlay.hide(immediately: true)
+    }
+
+    func testOverlayReportsVisibleLifetimeForScopedShortcuts() {
+        _ = NSApplication.shared
+        let overlay = OverlayController()
+        var visibility: [Bool] = []
+        overlay.onVisibilityChanged = { visibility.append($0) }
+
+        overlay.toggle()
+        overlay.toggle()
+
+        XCTAssertEqual(visibility, [true, false])
     }
 
     func testSettingsButtonClosesHUDBeforeOpeningSettings() {

@@ -64,12 +64,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         hotKeys = GlobalHotKeys { [weak self] action in
             switch action {
-            case .toggle:
-                if self?.overlay.hasContent == true { self?.overlay.toggle() }
-                else { self?.showOnboarding() }
+            case .toggle: self?.overlay.toggle()
             case .open(let index): self?.overlay.openTask(at: index, animated: false)
             case .dismiss(let index): self?.overlay.dismissTask(at: index, animated: false)
+            case .settings: self?.overlay.openSettings()
             }
+        }
+        overlay.onVisibilityChanged = { [weak self] visible in
+            self?.hotKeys?.setSettingsShortcutEnabled(visible)
         }
 
         inbox = CompletionInbox { [weak self] event in

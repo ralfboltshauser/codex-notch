@@ -74,6 +74,8 @@ These global shortcuts follow the Swiss German keyboard layout. Hold
 | `N`, `M` | Open tasks 9–10 |
 
 The existing number-key shortcuts remain available.
+While the notch is open, <kbd>Command</kbd>+<kbd>,</kbd> opens Settings. The
+shortcut is released back to the foreground app as soon as the notch closes.
 
 To remove Codex Notch, open **Connections** and choose **Uninstall Codex Notch…**.
 The app first removes and verifies its hooks, retry services, configuration, and
@@ -167,11 +169,11 @@ copy is stored outside Git at
 To publish a release after the Apple secrets are configured:
 
 ```sh
-./prepare-release.sh 0.3.7
+./prepare-release.sh 0.3.8
 git add AppResources/Info.plist
-git commit -m 'Prepare 0.3.7 release'
-git tag v0.3.7
-git push origin main v0.3.7
+git commit -m 'Prepare 0.3.8 release'
+git tag v0.3.8
+git push origin main v0.3.8
 ```
 
 The tag workflow builds and signs the complete app, notarizes and staples it,
