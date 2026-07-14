@@ -88,7 +88,7 @@ final class CodexNotchTests: XCTestCase {
         #!/bin/sh
         while IFS= read -r line; do
           case "$line" in
-            *account/rateLimits/read*)
+            *rateLimits*)
               printf '%s\\n' '{"id":2,"result":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":37,"windowDurationMins":10080}}}}'
               ;;
           esac
