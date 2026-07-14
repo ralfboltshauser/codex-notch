@@ -786,6 +786,84 @@ final class TaskRowView: NSView {
     }
 }
 
+final class WeeklyLimitView: NSView {
+    let percentageTextForTesting: String
+    let resetTextForTesting: String
+
+    init(limit: CodexWeeklyLimit) {
+        percentageTextForTesting = "\(limit.remainingPercent)% left"
+        if let resetsAt = limit.resetsAt {
+            let formatter = DateFormatter()
+            formatter.locale = .autoupdatingCurrent
+            formatter.timeZone = .autoupdatingCurrent
+            formatter.setLocalizedDateFormatFromTemplate("EEE HH:mm")
+            resetTextForTesting = "Resets \(formatter.string(from: resetsAt))"
+        } else {
+            resetTextForTesting = "Reset time unavailable"
+        }
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+
+        let icon = NSImageView(image: NSImage(
+            systemSymbolName: "gauge.with.dots.needle.33percent",
+            accessibilityDescription: "Weekly Codex limit"
+        ) ?? NSImage())
+        icon.contentTintColor = NSColor.white.withAlphaComponent(0.52)
+        icon.translatesAutoresizingMaskIntoConstraints = false
+
+        let title = NSTextField(labelWithString: "Weekly limit")
+        title.font = .systemFont(ofSize: 11, weight: .medium)
+        title.textColor = NSColor.white.withAlphaComponent(0.68)
+        title.translatesAutoresizingMaskIntoConstraints = false
+
+        let progress = NSProgressIndicator()
+        progress.style = .bar
+        progress.controlSize = .small
+        progress.isIndeterminate = false
+        progress.minValue = 0
+        progress.maxValue = 100
+        progress.doubleValue = Double(limit.remainingPercent)
+        progress.translatesAutoresizingMaskIntoConstraints = false
+
+        let percentage = NSTextField(labelWithString: percentageTextForTesting)
+        percentage.font = .monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
+        percentage.textColor = NSColor.white.withAlphaComponent(0.88)
+        percentage.translatesAutoresizingMaskIntoConstraints = false
+
+        let reset = NSTextField(labelWithString: resetTextForTesting)
+        reset.font = .systemFont(ofSize: 10.5, weight: .regular)
+        reset.textColor = NSColor.white.withAlphaComponent(0.46)
+        reset.alignment = .right
+        reset.translatesAutoresizingMaskIntoConstraints = false
+
+        [icon, title, progress, percentage, reset].forEach(addSubview)
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 30),
+            icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 13),
+            icon.centerYAnchor.constraint(equalTo: centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 14),
+            icon.heightAnchor.constraint(equalToConstant: 14),
+            title.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 7),
+            title.centerYAnchor.constraint(equalTo: centerYAnchor),
+            progress.leadingAnchor.constraint(equalTo: title.trailingAnchor, constant: 10),
+            progress.centerYAnchor.constraint(equalTo: centerYAnchor),
+            progress.widthAnchor.constraint(equalToConstant: 118),
+            progress.heightAnchor.constraint(equalToConstant: 6),
+            percentage.leadingAnchor.constraint(equalTo: progress.trailingAnchor, constant: 8),
+            percentage.centerYAnchor.constraint(equalTo: centerYAnchor),
+            reset.leadingAnchor.constraint(greaterThanOrEqualTo: percentage.trailingAnchor, constant: 12),
+            reset.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -13),
+            reset.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+
+        setAccessibilityElement(true)
+        setAccessibilityLabel("Codex weekly limit")
+        setAccessibilityValue("\(percentageTextForTesting), \(resetTextForTesting)")
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+}
+
 private struct IslandGeometry {
     let windowWidth: CGFloat
     let bodyInset: CGFloat
@@ -818,9 +896,11 @@ final class OverlayController {
     private var phase: Phase = .hidden
     private var pendingRebuild = false
     private var updateVersion: String?
+    private var weeklyLimit: CodexWeeklyLimit?
     private weak var updateButton: ClosureButton?
     private weak var settingsButton: ClosureButton?
     private weak var emptyStateView: EmptyStateView?
+    private weak var weeklyLimitView: WeeklyLimitView?
     private weak var rootView: HUDContentView?
     private var rowsByEventID: [String: TaskRowView] = [:]
     private var dismissingEventIDs: Set<String> = []
@@ -848,13 +928,14 @@ final class OverlayController {
     var updateButtonForTesting: NSButton? { updateButton }
     var settingsButtonForTesting: NSButton? { settingsButton }
     var hasEmptyStateForTesting: Bool { emptyStateView != nil }
+    var weeklyLimitViewForTesting: WeeklyLimitView? { weeklyLimitView }
     var rowArrivalAnimationCountForTesting: Int {
         rowsByEventID.values.filter(\.hasArrivalAnimationForTesting).count
     }
     var hasContentAnimationForTesting: Bool {
         rootView?.hasContentAnimationForTesting == true
     }
-    var hasContent: Bool { !tasks.isEmpty || updateVersion != nil }
+    var hasContent: Bool { !tasks.isEmpty || updateVersion != nil || weeklyLimit != nil }
 
     init(
         shouldReduceMotion: @escaping () -> Bool = {
@@ -929,6 +1010,26 @@ final class OverlayController {
         }
 
         if version != nil, !wasAvailable { showForEvent() }
+    }
+
+    func setWeeklyLimit(_ limit: CodexWeeklyLimit?) {
+        guard weeklyLimit != limit else { return }
+        weeklyLimit = limit
+        if !hasContent, phase != .launching {
+            hide(immediately: true)
+            rebuildContent(initiallyExpanded: false)
+            return
+        }
+
+        switch phase {
+        case .opening, .closing, .launching:
+            pendingRebuild = true
+        case .hidden:
+            rebuildContent(initiallyExpanded: false)
+        case .open:
+            rebuildContent(initiallyExpanded: true)
+            positionPanel()
+        }
     }
 
     func showForEvent() {
@@ -1235,6 +1336,13 @@ final class OverlayController {
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.addArrangedSubview(header)
 
+        if let weeklyLimit {
+            let limitView = WeeklyLimitView(limit: weeklyLimit)
+            stack.addArrangedSubview(limitView)
+            limitView.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+            weeklyLimitView = limitView
+        }
+
         var rows: [TaskRowView] = []
         var rowLookup: [String: TaskRowView] = [:]
         for (index, task) in tasks.enumerated() {
@@ -1285,7 +1393,8 @@ final class OverlayController {
 
         panel.contentView = root
         let contentHeight: CGFloat = tasks.isEmpty ? 168 : 62 + CGFloat(tasks.count * 48)
-        let height = geometry.notchHeight + contentHeight
+        let weeklyLimitHeight: CGFloat = weeklyLimit == nil ? 0 : 32
+        let height = geometry.notchHeight + contentHeight + weeklyLimitHeight
         let size = NSSize(width: geometry.windowWidth, height: height)
         panel.contentMinSize = size
         panel.contentMaxSize = size

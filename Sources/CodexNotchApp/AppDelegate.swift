@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let pairings = PairingStore()
     private let overlay = OverlayController()
     private let updater = UpdateCoordinator()
+    private let usageMonitor = CodexUsageMonitor()
     private var inbox: CompletionInbox?
     private var listener: TailscaleListener?
     private var listenerAddress: String?
@@ -58,13 +59,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updater.onAvailabilityChanged = { [weak self] version in
             self?.overlay.setUpdateAvailable(version: version)
         }
+        usageMonitor.onChange = { [weak self] limit in
+            self?.overlay.setWeeklyLimit(limit)
+        }
         store.onChange = { [weak self] tasks in self?.overlay.update(tasks: tasks) }
         overlay.update(tasks: store.tasks)
+        usageMonitor.start()
         updater.start()
 
         hotKeys = GlobalHotKeys { [weak self] action in
             switch action {
-            case .toggle: self?.overlay.toggle()
+            case .toggle:
+                self?.usageMonitor.refresh()
+                self?.overlay.toggle()
             case .open(let index): self?.overlay.openTask(at: index, animated: false)
             case .dismiss(let index): self?.overlay.dismissTask(at: index, animated: false)
             case .settings: self?.overlay.openSettings()
@@ -90,6 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             _ = try? self?.startRemoteListener(force: true)
             self?.scheduleRemoteCatchUp()
             self?.updater.checkForUpdateInformation()
+            self?.usageMonitor.refresh()
         }
 
         if !CodexHookInstaller().isInstalled
@@ -101,6 +109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         inbox?.stop()
         listener?.stop()
+        usageMonitor.stop()
         if let wakeObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver)
         }
@@ -110,7 +119,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let task = CompletedTask(event: event) else { return .rejected }
         do {
             let inserted = try store.add(task)
-            if inserted { overlay.showForEvent() }
+            if inserted {
+                usageMonitor.refresh()
+                overlay.showForEvent()
+            }
             return inserted ? .accepted : .duplicate
         } catch {
             return .rejected
