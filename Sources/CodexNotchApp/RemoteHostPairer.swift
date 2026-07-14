@@ -7,9 +7,11 @@ final class RemoteHostPairer {
     private static let aliasPattern = try! NSRegularExpression(pattern: "^[A-Za-z0-9._-]{1,128}$")
     private static let remoteScript = "$HOME/.local/lib/codex-notch/codex_notch_remote-v1.py"
     private let store: PairingStore
+    private let prepareReceiver: (String) throws -> Void
 
-    init(store: PairingStore) {
+    init(store: PairingStore, prepareReceiver: @escaping (String) throws -> Void) {
         self.store = store
+        self.prepareReceiver = prepareReceiver
     }
 
     func pair(sshAlias: String, label: String? = nil) throws -> RemoteHost {
@@ -43,6 +45,7 @@ final class RemoteHostPairer {
                 userInfo: [NSLocalizedDescriptionKey: "The bundled Ubuntu publisher is missing"]
             )
         }
+        try prepareReceiver(endpoint)
 
         let token = try randomToken()
         let host = RemoteHost(
@@ -73,7 +76,11 @@ final class RemoteHostPairer {
                 command: "\"\(Self.remoteScript)\" --install-json",
                 input: configurationData
             )
-            try runSSH(alias: sshAlias, command: "\"\(Self.remoteScript)\" --ping", input: nil)
+            try runSSH(
+                alias: sshAlias,
+                command: "\"\(Self.remoteScript)\" --ping --ping-attempts 5",
+                input: nil
+            )
         } catch {
             try? runSSH(
                 alias: sshAlias,

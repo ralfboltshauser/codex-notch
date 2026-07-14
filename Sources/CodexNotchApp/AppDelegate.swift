@@ -10,11 +10,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let updater = UpdateCoordinator()
     private var inbox: CompletionInbox?
     private var listener: TailscaleListener?
+    private var listenerAddress: String?
     private var hotKeys: GlobalHotKeys?
     private var onboarding: OnboardingWindowController?
     private var wakeObserver: NSObjectProtocol?
 
-    private lazy var pairer = RemoteHostPairer(store: pairings)
+    private lazy var pairer = RemoteHostPairer(store: pairings) { [weak self] endpoint in
+        guard let self else {
+            throw NSError(
+                domain: "CodexNotch",
+                code: 33,
+                userInfo: [NSLocalizedDescriptionKey: "Codex Notch closed before pairing could start"]
+            )
+        }
+        let receiver: TailscaleListener
+        if Thread.isMainThread {
+            receiver = try self.startRemoteListener(at: endpoint, force: true)
+        } else {
+            receiver = try DispatchQueue.main.sync {
+                try self.startRemoteListener(at: endpoint, force: true)
+            }
+        }
+        try receiver.waitUntilReady()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -51,7 +69,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.ingest(event) != .rejected
         }
         try? inbox?.start()
-        startRemoteListener()
+        _ = try? startRemoteListener()
         scheduleRemoteCatchUp()
 
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
@@ -59,7 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.startRemoteListener()
+            _ = try? self?.startRemoteListener(force: true)
             self?.scheduleRemoteCatchUp()
             self?.updater.checkForUpdateInformation()
         }
@@ -89,18 +107,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func startRemoteListener() {
+    private func startRemoteListener(
+        at requestedAddress: String? = nil,
+        force: Bool = false
+    ) throws -> TailscaleListener {
+        let address: String
+        if let requestedAddress {
+            address = requestedAddress
+        } else if let discoveredAddress = TailscaleDiscovery.localIPv4() {
+            address = discoveredAddress
+        } else {
+            throw NSError(
+                domain: "CodexNotch",
+                code: 21,
+                userInfo: [NSLocalizedDescriptionKey: "Tailscale is not running on this Mac"]
+            )
+        }
+        if !force, let listener, listenerAddress == address { return listener }
+
         listener?.stop()
         listener = nil
-        guard let address = TailscaleDiscovery.localIPv4() else { return }
+        listenerAddress = nil
         let listener = TailscaleListener(pairings: pairings) { [weak self] event in
             self?.ingest(event) ?? .rejected
         }
         do {
             try listener.start(host: address)
             self.listener = listener
+            listenerAddress = address
+            return listener
         } catch {
-            FileHandle.standardError.write(Data("Could not start Tailscale listener: \(error)\n".utf8))
+            listener.stop()
+            throw error
         }
     }
 
@@ -116,7 +154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showOnboarding() {
         onboarding = OnboardingWindowController(pairings: pairings, pairer: pairer)
         onboarding?.onConnectionsChanged = { [weak self] in
-            self?.startRemoteListener()
+            _ = try? self?.startRemoteListener()
             self?.scheduleRemoteCatchUp()
         }
         onboarding?.present()

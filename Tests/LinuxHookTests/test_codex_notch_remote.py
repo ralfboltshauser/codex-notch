@@ -181,6 +181,30 @@ class LinuxHookTests(unittest.TestCase):
         self.assertEqual(acknowledgement["status"], "pong")
         self.assertEqual(ProtocolHandler.received[0]["token"], "a" * 64)
 
+    def test_ping_retries_transient_receiver_startup_failure(self):
+        with mock.patch.object(remote, "send_envelope", side_effect=[
+            ConnectionRefusedError("receiver is starting"),
+            {"protocol_version": 1, "status": "pong"},
+        ]) as send, mock.patch.object(remote.time, "sleep") as sleep:
+            acknowledgement = remote.ping_receiver(self.configuration, attempts=2)
+        self.assertEqual(acknowledgement["status"], "pong")
+        self.assertEqual(send.call_count, 2)
+        sleep.assert_called_once_with(0.25)
+
+    def test_ping_failure_is_concise_and_does_not_leak_a_traceback(self):
+        remote.atomic_json_write(remote.config_file(), self.configuration)
+        stderr = io.StringIO()
+        with mock.patch.object(
+            remote,
+            "send_envelope",
+            side_effect=ConnectionRefusedError("connection refused"),
+        ), mock.patch("sys.stderr", stderr):
+            self.assertEqual(remote.main(["--ping"]), 1)
+        message = stderr.getvalue()
+        self.assertIn("Could not reach Codex Notch on this Mac", message)
+        self.assertIn("127.0.0.1", message)
+        self.assertNotIn("Traceback", message)
+
     def test_uninstall_removes_configuration_and_queued_metadata(self):
         remote.atomic_json_write(remote.config_file(), self.configuration)
         remote.atomic_json_write(remote.outbox_directory() / ("a" * 64 + ".json"), {})
