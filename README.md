@@ -61,6 +61,13 @@ To add Ubuntu, enter its SSH alias in **Connections** and choose **Pair**. The
 app opens a remote Codex session so you can review and trust `Queueing completion
 for Codex Notch` there as well.
 
+To remove Codex Notch, open **Connections** and choose **Uninstall Codex Notch…**.
+The app first removes and verifies its hooks, retry services, configuration, and
+queued events on every paired Ubuntu host. It then removes the local hook and
+hook backup, login registration, pairing credentials, app data, and app bundle
+from the Mac. If a remote host cannot be reached, the Mac installation is kept
+so the cleanup can be retried without forgetting that host.
+
 ## Manual Ubuntu install
 
 Normal pairing is initiated by the Mac app. For development, the publisher can
@@ -143,14 +150,14 @@ The release workflow needs these GitHub Actions secrets:
 copy is stored outside Git at
 `~/.config/codex-notch/sparkle_private_key`; back it up in a password manager.
 
-To publish after the remaining Apple secrets are configured:
+To publish a release after the Apple secrets are configured:
 
 ```sh
-./prepare-release.sh 0.3.1
+./prepare-release.sh 0.3.4
 git add AppResources/Info.plist
-git commit -m 'Prepare 0.3.1 release'
-git tag v0.3.1
-git push origin main v0.3.1
+git commit -m 'Prepare 0.3.4 release'
+git tag v0.3.4
+git push origin main v0.3.4
 ```
 
 The tag workflow builds and signs the complete app, notarizes and staples it,

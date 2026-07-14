@@ -4,7 +4,8 @@ import Foundation
 import Security
 
 final class RemoteHostPairer {
-    private static let aliasPattern = try! NSRegularExpression(pattern: "^[A-Za-z0-9._-]{1,128}$")
+    private static let aliasPattern = try! NSRegularExpression(pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+    private static let remoteDirectory = "$HOME/.local/lib/codex-notch"
     private static let remoteScript = "$HOME/.local/lib/codex-notch/codex_notch_remote-v1.py"
     private let store: PairingStore
     private let prepareReceiver: (String) throws -> Void
@@ -36,15 +37,7 @@ final class RemoteHostPairer {
                 userInfo: [NSLocalizedDescriptionKey: "Tailscale is not running on this Mac"]
             )
         }
-        guard let script = Bundle.main.resourceURL?
-            .appendingPathComponent("remote/codex_notch_remote.py"),
-              let scriptData = try? Data(contentsOf: script) else {
-            throw NSError(
-                domain: "CodexNotch",
-                code: 22,
-                userInfo: [NSLocalizedDescriptionKey: "The bundled Ubuntu publisher is missing"]
-            )
-        }
+        let scriptData = try bundledRemoteScript()
         try prepareReceiver(endpoint)
 
         let token = try randomToken()
@@ -69,8 +62,8 @@ final class RemoteHostPairer {
             command: "mkdir -p \"$HOME/.local/lib/codex-notch\" && umask 077 && cat > \"\(Self.remoteScript)\" && chmod 700 \"\(Self.remoteScript)\"",
             input: scriptData
         )
-        try store.save(host, token: token)
         do {
+            try store.save(host, token: token)
             try runSSH(
                 alias: sshAlias,
                 command: "\"\(Self.remoteScript)\" --install-json",
@@ -84,8 +77,8 @@ final class RemoteHostPairer {
         } catch {
             try? runSSH(
                 alias: sshAlias,
-                command: "if [ -x \"\(Self.remoteScript)\" ]; then \"\(Self.remoteScript)\" --uninstall; rm -f \"\(Self.remoteScript)\"; fi",
-                input: nil
+                command: Self.remoteUninstallCommand,
+                input: scriptData
             )
             try? store.remove(id: host.id)
             throw error
@@ -128,12 +121,25 @@ final class RemoteHostPairer {
     }
 
     func unpair(_ host: RemoteHost) throws {
-        try? runSSH(
+        let scriptData = try bundledRemoteScript()
+        try runSSH(
             alias: host.sshAlias,
-            command: "if [ -x \"\(Self.remoteScript)\" ]; then \"\(Self.remoteScript)\" --uninstall; rm -f \"\(Self.remoteScript)\"; fi",
-            input: nil
+            command: Self.remoteUninstallCommand,
+            input: scriptData
         )
         try store.remove(id: host.id)
+    }
+
+    func uninstallAll() throws {
+        let hosts = store.hosts
+        var failures: [(RemoteHost, Error)] = []
+        for host in hosts {
+            do { try unpair(host) }
+            catch { failures.append((host, error)) }
+        }
+        guard failures.isEmpty else {
+            throw RemoteHostUninstallError(failures: failures, cleanedCount: hosts.count - failures.count)
+        }
     }
 
     func openSession(_ threadID: String) throws {
@@ -151,10 +157,17 @@ final class RemoteHostPairer {
     }
 
     func openTrustReview(for host: RemoteHost) throws {
+        guard Self.isValidAlias(host.sshAlias) else {
+            throw NSError(
+                domain: "CodexNotch",
+                code: 20,
+                userInfo: [NSLocalizedDescriptionKey: "The stored SSH host alias is invalid"]
+            )
+        }
         try AppPaths.prepareDirectory(AppPaths.applicationSupport)
         let commandFile = AppPaths.applicationSupport
             .appendingPathComponent("Review \(host.id) Hook.command")
-        let script = "#!/bin/sh\nprintf '\\033]0;Review Remote Codex Hook\\007'\n\necho 'Type /hooks and trust “Queueing completion for Codex Notch”.'\necho\nexec /usr/bin/ssh -t \(host.sshAlias) codex\n"
+        let script = "#!/bin/sh\nprintf '\\033]0;Review Remote Codex Hook\\007'\n\necho 'Type /hooks and trust “Queueing completion for Codex Notch”.'\necho\nexec /usr/bin/ssh -t -- \(host.sshAlias) codex\n"
         try Data(script.utf8).write(to: commandFile, options: .atomic)
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o700],
@@ -168,6 +181,13 @@ final class RemoteHostPairer {
         command: String,
         input: Data?
     ) throws {
+        guard Self.isValidAlias(alias) else {
+            throw NSError(
+                domain: "CodexNotch",
+                code: 20,
+                userInfo: [NSLocalizedDescriptionKey: "The stored SSH host alias is invalid"]
+            )
+        }
         let process = Process()
         let stdin = Pipe()
         let stderr = Pipe()
@@ -175,6 +195,7 @@ final class RemoteHostPairer {
         process.arguments = [
             "-o", "BatchMode=yes",
             "-o", "ConnectTimeout=10",
+            "--",
             alias,
             command,
         ]
@@ -216,6 +237,13 @@ final class RemoteHostPairer {
     }
 
     private func runSSHForOutput(alias: String, command: String) throws -> Data {
+        guard Self.isValidAlias(alias) else {
+            throw NSError(
+                domain: "CodexNotch",
+                code: 20,
+                userInfo: [NSLocalizedDescriptionKey: "The stored SSH host alias is invalid"]
+            )
+        }
         let process = Process()
         let stdout = Pipe()
         let stderr = Pipe()
@@ -223,6 +251,7 @@ final class RemoteHostPairer {
         process.arguments = [
             "-o", "BatchMode=yes",
             "-o", "ConnectTimeout=10",
+            "--",
             alias,
             command,
         ]
@@ -235,11 +264,11 @@ final class RemoteHostPairer {
             let message = String(
                 decoding: stderr.fileHandleForReading.readDataToEndOfFile(),
                 as: UTF8.self
-            ).trimmingCharacters(in: .whitespacesAndNewlines)
+            )
             throw NSError(
                 domain: "CodexNotch",
                 code: Int(process.terminationStatus),
-                userInfo: [NSLocalizedDescriptionKey: message.isEmpty ? "SSH command failed" : message]
+                userInfo: [NSLocalizedDescriptionKey: Self.userFacingSSHError(message)]
             )
         }
         return stdout.fileHandleForReading.readDataToEndOfFile()
@@ -261,5 +290,74 @@ final class RemoteHostPairer {
             in: value,
             range: NSRange(value.startIndex..., in: value)
         ) != nil
+    }
+
+    private func bundledRemoteScript() throws -> Data {
+        guard let script = Bundle.main.resourceURL?
+            .appendingPathComponent("remote/codex_notch_remote.py"),
+              let data = try? Data(contentsOf: script) else {
+            throw NSError(
+                domain: "CodexNotch",
+                code: 22,
+                userInfo: [NSLocalizedDescriptionKey: "The bundled Ubuntu publisher is missing"]
+            )
+        }
+        return data
+    }
+
+    private static let remoteUninstallCommand = """
+    set -eu
+    temporary=$(mktemp "${TMPDIR:-/tmp}/codex-notch-uninstall.XXXXXX")
+    trap 'rm -f "$temporary"' EXIT HUP INT TERM
+    cat > "$temporary"
+    chmod 700 "$temporary"
+    "$temporary" --uninstall
+    rm -f "\(remoteScript)"
+    rmdir "\(remoteDirectory)" 2>/dev/null || true
+
+    codex_home=${CODEX_HOME:-$HOME/.codex}
+    config_home=${XDG_CONFIG_HOME:-$HOME/.config}
+    state_home=${XDG_STATE_HOME:-$HOME/.local/state}
+    systemd_home="$config_home/systemd/user"
+    for hook_file in "$codex_home/hooks.json" "$codex_home/hooks.json.bak"; do
+        if [ -f "$hook_file" ] && grep -F -q -- '--codex-notch-remote-hook' "$hook_file"; then
+            echo "Codex Notch hook remains in $hook_file" >&2
+            exit 1
+        fi
+    done
+    for artifact in \
+        "\(remoteScript)" \
+        "$config_home/codex-notch" \
+        "$state_home/codex-notch" \
+        "$systemd_home/codex-notch-flush.service" \
+        "$systemd_home/codex-notch-flush.timer"; do
+        if [ -e "$artifact" ]; then
+            echo "Codex Notch artifact remains at $artifact" >&2
+            exit 1
+        fi
+    done
+    if command -v systemctl >/dev/null 2>&1; then
+        if systemctl --user is-active --quiet codex-notch-flush.timer \
+            || systemctl --user is-active --quiet codex-notch-flush.service; then
+            echo "Codex Notch retry service is still active" >&2
+            exit 1
+        fi
+    fi
+    """
+}
+
+private struct RemoteHostUninstallError: LocalizedError {
+    let failures: [(RemoteHost, Error)]
+    let cleanedCount: Int
+
+    var errorDescription: String? {
+        let names = failures.map { $0.0.label }.joined(separator: ", ")
+        let reason = failures.first.map { concise($0.1.localizedDescription) } ?? "SSH cleanup failed"
+        let prefix = cleanedCount > 0 ? "Cleaned \(cleanedCount) remote host\(cleanedCount == 1 ? "" : "s"). " : ""
+        return "\(prefix)Couldn’t clean \(names): \(reason). The Mac app and local hook were kept; reconnect the host and retry."
+    }
+
+    private func concise(_ value: String) -> String {
+        value.components(separatedBy: .newlines).first ?? value
     }
 }

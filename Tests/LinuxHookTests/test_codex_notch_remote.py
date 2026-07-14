@@ -207,20 +207,45 @@ class LinuxHookTests(unittest.TestCase):
 
     def test_uninstall_removes_configuration_and_queued_metadata(self):
         remote.atomic_json_write(remote.config_file(), self.configuration)
+        (remote.config_root() / "stale").write_text("stale metadata")
         remote.atomic_json_write(remote.outbox_directory() / ("a" * 64 + ".json"), {})
-        remote.atomic_json_write(remote.hooks_file(), {"hooks": {
+        hooks = {"hooks": {
             "Stop": [{"hooks": [
                 {"type": "command", "command": "/other"},
                 {"type": "command", "command": str(SCRIPT) + " " + remote.MARKER},
             ]}],
-        }})
+        }}
+        remote.atomic_json_write(remote.hooks_file(), hooks)
+        remote.atomic_json_write(
+            remote.hooks_file().with_name(remote.hooks_file().name + ".bak"),
+            hooks,
+        )
+        owned_state_key = "%s:stop:0:1" % remote.hooks_file()
+        remote.codex_config_file().write_text(
+            "[hooks.state]\n\n"
+            "[hooks.state.%s]\ntrusted_hash = \"sha256:owned\"\n\n"
+            "[hooks.state.\"plugin:unrelated\"]\ntrusted_hash = \"sha256:unrelated\"\n"
+            % json.dumps(owned_state_key)
+        )
+        installed_script = self.home / ".local/lib/codex-notch/codex_notch_remote-v1.py"
+        installed_script.parent.mkdir(parents=True)
+        installed_script.write_text("stale publisher")
 
         with mock.patch.object(remote.subprocess, "run"):
             remote.uninstall()
         self.assertFalse(remote.config_file().exists())
+        self.assertFalse(remote.config_root().exists())
         self.assertFalse(remote.state_root().exists())
+        self.assertFalse(installed_script.exists())
         root = json.loads(remote.hooks_file().read_text())
         self.assertEqual(root["hooks"]["Stop"][0]["hooks"][0]["command"], "/other")
+        backup = json.loads(
+            remote.hooks_file().with_name(remote.hooks_file().name + ".bak").read_text()
+        )
+        self.assertEqual(backup["hooks"]["Stop"][0]["hooks"][0]["command"], "/other")
+        config = remote.codex_config_file().read_text()
+        self.assertNotIn(owned_state_key, config)
+        self.assertIn("plugin:unrelated", config)
 
 
 if __name__ == "__main__":
