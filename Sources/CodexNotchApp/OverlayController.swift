@@ -823,12 +823,6 @@ final class WeeklyLimitView: NSView {
         progress.minValue = 0
         progress.maxValue = 100
         progress.doubleValue = Double(limit.remainingPercent)
-        progress.contentTintColor = NSColor(
-            calibratedRed: 0.40,
-            green: 0.91,
-            blue: 0.71,
-            alpha: 1
-        )
         progress.translatesAutoresizingMaskIntoConstraints = false
 
         let percentage = NSTextField(labelWithString: percentageTextForTesting)
