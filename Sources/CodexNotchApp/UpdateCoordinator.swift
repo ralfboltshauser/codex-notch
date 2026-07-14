@@ -31,6 +31,10 @@ final class UpdateCoordinator: NSObject, SPUUpdaterDelegate {
     }
 
     func installAvailableUpdate() {
+        checkForUpdates()
+    }
+
+    func checkForUpdates() {
         controller.checkForUpdates(nil)
     }
 

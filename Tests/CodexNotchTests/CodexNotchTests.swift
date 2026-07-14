@@ -732,6 +732,27 @@ final class CodexNotchTests: XCTestCase {
         )
     }
 
+    func testSettingsCheckForUpdatesButtonInvokesHandler() throws {
+        _ = NSApplication.shared
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pairings = PairingStore(fileURL: directory.appendingPathComponent("pairings.json"))
+        let pairer = RemoteHostPairer(store: pairings) { _ in }
+        let controller = OnboardingWindowController(
+            pairings: pairings,
+            pairer: pairer,
+            isHookInstalled: { true }
+        )
+        var checked = false
+        controller.onCheckForUpdates = { checked = true }
+
+        let button = try XCTUnwrap(controller.checkForUpdatesButtonForTesting)
+        XCTAssertEqual(button.title, "Check for Updates")
+        button.performClick(nil)
+
+        XCTAssertTrue(checked)
+    }
+
     func testTailscaleListenerReportsReadyBeforePairingContinues() throws {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
