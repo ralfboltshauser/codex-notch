@@ -254,11 +254,14 @@ final class OverlayController {
     private var isPinned = false
     private var currentBodyInset: CGFloat = 0
     private var transitionID = 0
+    private var updateVersion: String?
+    private weak var updateButton: ClosureButton?
 
     var onOpen: ((Int) -> Void)?
     var onDismiss: ((Int) -> Void)?
     var onClear: (() -> Void)?
     var onSettings: (() -> Void)?
+    var onUpdate: (() -> Void)?
     var frameForTesting: NSRect { panel.frame }
     var bodyHeightForTesting: CGFloat { panel.frame.height }
     var bodyWidthForTesting: CGFloat { panel.frame.width - currentBodyInset * 2 }
@@ -268,6 +271,9 @@ final class OverlayController {
     var isVisibleForTesting: Bool { panel.isVisible }
     var panelAlphaForTesting: CGFloat { panel.alphaValue }
     var contentViewForTesting: NSView? { panel.contentView }
+    var isUpdateAvailableForTesting: Bool { updateVersion != nil }
+    var updateButtonForTesting: NSButton? { updateButton }
+    var hasContent: Bool { !tasks.isEmpty || updateVersion != nil }
 
     init() {
         panel = FocuslessPanel(
@@ -296,19 +302,32 @@ final class OverlayController {
     func update(tasks: [CompletedTask]) {
         self.tasks = tasks
         rebuildContent()
-        if tasks.isEmpty { hide(immediately: true) }
+        if !hasContent { hide(immediately: true) }
         else if panel.isVisible { positionPanel() }
     }
 
+    func setUpdateAvailable(version: String?) {
+        let wasAvailable = updateVersion != nil
+        updateVersion = version
+        rebuildContent()
+        if version != nil, !wasAvailable {
+            showForEvent()
+        } else if !hasContent {
+            hide(immediately: true)
+        } else if panel.isVisible {
+            positionPanel()
+        }
+    }
+
     func showForEvent() {
-        guard !tasks.isEmpty else { return }
+        guard hasContent else { return }
         if !panel.isVisible { targetScreen = screenUnderPointer() }
         let remainsPinned = panel.isVisible && isPinned
         present(autoHide: !remainsPinned)
     }
 
     private func present(autoHide: Bool) {
-        guard !tasks.isEmpty else { return }
+        guard hasContent else { return }
         transitionID &+= 1
         let wasVisible = panel.isVisible
         rebuildContent()
@@ -378,7 +397,8 @@ final class OverlayController {
         heading.textColor = NSColor.white.withAlphaComponent(0.72)
         heading.translatesAutoresizingMaskIntoConstraints = false
 
-        let count = NSTextField(labelWithString: "\(tasks.count) READY")
+        let countText = tasks.isEmpty && updateVersion != nil ? "UPDATE READY" : "\(tasks.count) READY"
+        let count = NSTextField(labelWithString: countText)
         count.font = .monospacedDigitSystemFont(ofSize: 9.5, weight: .medium)
         count.textColor = NSColor.white.withAlphaComponent(0.32)
         count.translatesAutoresizingMaskIntoConstraints = false
@@ -401,11 +421,22 @@ final class OverlayController {
         settings.toolTip = "Connection settings"
         settings.alphaValue = 0
         settings.translatesAutoresizingMaskIntoConstraints = false
+
+        let update = ClosureButton { [weak self] in self?.onUpdate?() }
+        update.image = NSImage(
+            systemSymbolName: "arrow.down.circle.fill",
+            accessibilityDescription: "Install Codex Notch update"
+        )
+        update.contentTintColor = NSColor(calibratedRed: 0.40, green: 0.91, blue: 0.71, alpha: 1)
+        update.toolTip = updateVersion.map { "Install Codex Notch \($0)" }
+        update.translatesAutoresizingMaskIntoConstraints = false
+        update.isHidden = updateVersion == nil
+        updateButton = update
         root.controls = [clear, settings]
 
         let header = NSView()
         header.translatesAutoresizingMaskIntoConstraints = false
-        [codexIcon, heading, count, toggleHint, clear, settings].forEach(header.addSubview)
+        [codexIcon, heading, count, toggleHint, clear, update, settings].forEach(header.addSubview)
         NSLayoutConstraint.activate([
             header.heightAnchor.constraint(equalToConstant: 44),
             codexIcon.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 13),
@@ -417,7 +448,11 @@ final class OverlayController {
             count.leadingAnchor.constraint(equalTo: heading.trailingAnchor, constant: 8),
             count.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             clear.leadingAnchor.constraint(greaterThanOrEqualTo: count.trailingAnchor, constant: 12),
-            settings.leadingAnchor.constraint(equalTo: clear.trailingAnchor, constant: 6),
+            update.leadingAnchor.constraint(equalTo: clear.trailingAnchor, constant: 6),
+            update.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            update.widthAnchor.constraint(equalToConstant: 24),
+            update.heightAnchor.constraint(equalToConstant: 24),
+            settings.leadingAnchor.constraint(equalTo: update.trailingAnchor, constant: 4),
             toggleHint.leadingAnchor.constraint(equalTo: settings.trailingAnchor, constant: 10),
             toggleHint.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -10),
             toggleHint.centerYAnchor.constraint(equalTo: header.centerYAnchor),

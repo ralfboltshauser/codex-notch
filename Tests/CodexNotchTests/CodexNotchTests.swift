@@ -148,6 +148,23 @@ final class CodexNotchTests: XCTestCase {
         overlay.hide(immediately: true)
     }
 
+    func testUpdateAvailabilityAddsClickablePersistentContent() {
+        _ = NSApplication.shared
+        let overlay = OverlayController()
+        var clicked = false
+        overlay.onUpdate = { clicked = true }
+
+        overlay.setUpdateAvailable(version: "0.4.0")
+        XCTAssertTrue(overlay.isUpdateAvailableForTesting)
+        XCTAssertTrue(overlay.hasContent)
+        overlay.updateButtonForTesting?.performClick(nil)
+        XCTAssertTrue(clicked)
+
+        overlay.setUpdateAvailable(version: nil)
+        XCTAssertFalse(overlay.hasContent)
+        overlay.hide(immediately: true)
+    }
+
     private func makeEvent() -> CompletionEvent {
         CompletionEvent(
             eventID: CompletionEvent.eventID(threadID: threadID, turnID: "turn-1"),

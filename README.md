@@ -117,3 +117,43 @@ NOTARY_PROFILE='codex-notch-notary' \
 ```
 
 The notarized archive is written to `.build/dist/CodexNotch.zip`.
+
+## Updates
+
+Codex Notch uses Sparkle 2.9.4 with a signed appcast hosted as a GitHub Release
+asset. The app probes the feed silently every six hours. When a newer signed
+version exists, a green download icon appears in the notch; selecting it opens
+Sparkle's verified install flow. Update archives are checked with both Apple
+code signing and a dedicated Ed25519 signature. Feed metadata is signed too,
+and each archive is verified before extraction.
+
+The release workflow needs these GitHub Actions secrets:
+
+- `MACOS_CERTIFICATE_P12`: base64-encoded Developer ID Application certificate
+- `MACOS_CERTIFICATE_PASSWORD`: password protecting the `.p12`
+- `APPLE_ID`: Apple ID used for notarization
+- `APPLE_TEAM_ID`: Apple Developer team ID
+- `APPLE_APP_PASSWORD`: app-specific Apple ID password
+- `SPARKLE_PRIVATE_KEY`: base64 Sparkle private seed
+
+`SPARKLE_PRIVATE_KEY` is configured for this repository. Its local recovery
+copy is stored outside Git at
+`~/.config/codex-notch/sparkle_private_key`; back it up in a password manager.
+
+To publish after the remaining Apple secrets are configured:
+
+```sh
+./prepare-release.sh 0.3.1
+git add AppResources/Info.plist
+git commit -m 'Prepare 0.3.1 release'
+git tag v0.3.1
+git push origin main v0.3.1
+```
+
+The tag workflow builds and signs the complete app, notarizes and staples it,
+generates an EdDSA-signed `appcast.xml`, and publishes both files in a GitHub
+Release. Sparkle reads the feed through GitHub's stable
+`releases/latest/download/appcast.xml` URL.
+
+See [docs/update-pipeline.md](docs/update-pipeline.md) for certificate setup,
+release commands, key recovery, and first-release testing.

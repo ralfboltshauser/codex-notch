@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let store = TaskStore()
     private let pairings = PairingStore()
     private let overlay = OverlayController()
+    private let updater = UpdateCoordinator()
     private var inbox: CompletionInbox?
     private var listener: TailscaleListener?
     private var hotKeys: GlobalHotKeys?
@@ -23,13 +24,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlay.onDismiss = { [weak self] index in self?.dismissTask(at: index) }
         overlay.onClear = { [weak self] in self?.store.removeAll() }
         overlay.onSettings = { [weak self] in self?.showOnboarding() }
+        overlay.onUpdate = { [weak self] in
+            self?.overlay.hide()
+            NSApp.activate(ignoringOtherApps: true)
+            self?.updater.installAvailableUpdate()
+        }
+        updater.onAvailabilityChanged = { [weak self] version in
+            self?.overlay.setUpdateAvailable(version: version)
+        }
         store.onChange = { [weak self] tasks in self?.overlay.update(tasks: tasks) }
         overlay.update(tasks: store.tasks)
+        updater.start()
 
         hotKeys = GlobalHotKeys { [weak self] action in
             switch action {
             case .toggle:
-                if self?.store.tasks.isEmpty == false { self?.overlay.toggle() }
+                if self?.overlay.hasContent == true { self?.overlay.toggle() }
                 else { self?.showOnboarding() }
             case .open(let index): self?.openTask(at: index)
             case .dismiss(let index): self?.dismissTask(at: index)
@@ -50,6 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] _ in
             self?.startRemoteListener()
             self?.scheduleRemoteCatchUp()
+            self?.updater.checkForUpdateInformation()
         }
 
         if !CodexHookInstaller().isInstalled
