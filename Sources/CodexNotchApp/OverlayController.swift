@@ -935,14 +935,19 @@ final class OverlayController {
         let notchHeight = max(CGFloat(28), max(safeTop, menuHeight))
         let leftArea = screen.auxiliaryTopLeftArea
         let rightArea = screen.auxiliaryTopRightArea
-        let measuredGap = rightArea.minX - leftArea.maxX
-        let hasHardwareNotch = leftArea.width > 0
-            && rightArea.width > 0
-            && measuredGap >= 80
-            && measuredGap <= screen.frame.width * 0.35
-        let notchWidth = hasHardwareNotch ? measuredGap : 128
-        let measuredCenter = (leftArea.maxX + rightArea.minX) / 2
-        let centerOffset = hasHardwareNotch ? measuredCenter - screen.frame.midX : 0
+        var notchWidth: CGFloat = 128
+        var centerOffset: CGFloat = 0
+        if let leftArea, let rightArea {
+            let measuredGap = rightArea.minX - leftArea.maxX
+            let hasHardwareNotch = leftArea.width > 0
+                && rightArea.width > 0
+                && measuredGap >= 80
+                && measuredGap <= screen.frame.width * 0.35
+            if hasHardwareNotch {
+                notchWidth = measuredGap
+                centerOffset = (leftArea.maxX + rightArea.minX) / 2 - screen.frame.midX
+            }
+        }
         let bodyInset: CGFloat = 34
         let bodyWidth = min(680, max(500, screen.frame.width - 120))
         return IslandGeometry(
