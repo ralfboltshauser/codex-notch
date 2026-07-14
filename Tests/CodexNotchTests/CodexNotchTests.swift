@@ -130,7 +130,7 @@ final class CodexNotchTests: XCTestCase {
 
     func testOverlayGeometryAndPresentationModes() {
         _ = NSApplication.shared
-        let overlay = OverlayController()
+        let overlay = OverlayController(shouldReduceMotion: { false })
         overlay.update(tasks: [CompletedTask(
             eventID: String(repeating: "b", count: 64),
             title: String(repeating: "A long finished task title ", count: 8),
@@ -188,7 +188,11 @@ final class CodexNotchTests: XCTestCase {
         overlay.toggle()
         overlay.openTask(at: 0)
         XCTAssertEqual(activated, task)
-        XCTAssertTrue(overlay.isLaunchingForTesting)
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            XCTAssertFalse(overlay.isLaunchingForTesting)
+        } else {
+            XCTAssertTrue(overlay.isLaunchingForTesting)
+        }
         wait(for: [finished], timeout: 1)
         XCTAssertFalse(overlay.isVisibleForTesting)
     }
