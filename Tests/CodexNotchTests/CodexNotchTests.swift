@@ -90,6 +90,7 @@ final class CodexNotchTests: XCTestCase {
           case "$line" in
             *rateLimits*)
               printf '%s\\n' '{"id":2,"result":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":37,"windowDurationMins":10080}}}}'
+              exit 0
               ;;
           esac
         done
