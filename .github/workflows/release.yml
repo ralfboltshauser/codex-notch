@@ -16,9 +16,10 @@ jobs:
   macos:
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Validate release configuration
         env:
@@ -80,6 +81,31 @@ jobs:
       - name: Build signed app
         run: ./build-macos-app.sh
 
+      - name: Verify signing identity and architecture
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -eu
+          : "${APPLE_TEAM_ID:?Missing APPLE_TEAM_ID secret}"
+          APP='.build/dist/Codex Notch.app'
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          ACTUAL_TEAM_ID=$(codesign -dv --verbose=4 "$APP" 2>&1 \
+            | sed -n 's/^TeamIdentifier=//p')
+          test "$ACTUAL_TEAM_ID" = "$APPLE_TEAM_ID" || {
+            echo "Signed app team $ACTUAL_TEAM_ID does not match APPLE_TEAM_ID" >&2
+            exit 1
+          }
+          for binary in \
+            "$APP/Contents/MacOS/CodexNotch" \
+            "$APP/Contents/Helpers/CodexNotchHook"
+          do
+            ARCHS=$(lipo -archs "$binary")
+            test "$ARCHS" = arm64 || {
+              echo "$binary must be Apple Silicon-only; found: $ARCHS" >&2
+              exit 1
+            }
+          done
+
       - name: Notarize and staple
         env:
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
@@ -97,6 +123,7 @@ jobs:
             --team-id "$APPLE_TEAM_ID" \
             --wait
           xcrun stapler staple "$APP"
+          xcrun stapler validate "$APP"
           rm -f "$ARCHIVE"
           ditto -c -k --keepParent "$APP" "$ARCHIVE"
           spctl --assess --type execute --verbose=2 "$APP"
@@ -111,8 +138,13 @@ jobs:
           mkdir -p "$ASSETS"
           cp '.build/dist/CodexNotch.zip' "$ASSETS/CodexNotch-$VERSION.zip"
           GENERATE_APPCAST=$(find .build/artifacts -type f -name generate_appcast -print -quit)
+          SIGN_UPDATE=$(find .build/artifacts -type f -name sign_update -print -quit)
           test -x "$GENERATE_APPCAST" || {
             echo "Sparkle generate_appcast tool not found" >&2
+            exit 1
+          }
+          test -x "$SIGN_UPDATE" || {
+            echo "Sparkle sign_update tool not found" >&2
             exit 1
           }
           printf '%s\n' "$SPARKLE_PRIVATE_KEY" | "$GENERATE_APPCAST" \
@@ -122,14 +154,43 @@ jobs:
             --maximum-deltas 0 \
             -o "$ASSETS/appcast.xml" \
             "$ASSETS"
+          SIGNATURE=$(python3 - "$ASSETS/appcast.xml" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse(sys.argv[1]).getroot()
+          signature_key = "{http://www.andymatuschak.org/xml-namespaces/sparkle}edSignature"
+          signatures = [
+              enclosure.attrib.get(signature_key, "")
+              for enclosure in root.findall("./channel/item/enclosure")
+          ]
+          print(next((signature for signature in signatures if signature), ""))
+          PY
+          )
+          test -n "$SIGNATURE" || {
+            echo "Appcast archive signature is missing; SPARKLE_PRIVATE_KEY may not match SUPublicEDKey" >&2
+            exit 1
+          }
+          ARCHIVE="$ASSETS/CodexNotch-$VERSION.zip"
+          printf '%s\n' "$SPARKLE_PRIVATE_KEY" | "$SIGN_UPDATE" \
+            --ed-key-file - --verify "$ARCHIVE" "$SIGNATURE"
+          printf '%s\n' "$SPARKLE_PRIVATE_KEY" | "$SIGN_UPDATE" \
+            --ed-key-file - --verify "$ASSETS/appcast.xml"
+          (
+            cd "$ASSETS"
+            shasum -a 256 "CodexNotch-$VERSION.zip" \
+              > "CodexNotch-$VERSION.zip.sha256"
+          )
 
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -eu
           VERSION=${GITHUB_REF_NAME#v}
           gh release create "$GITHUB_REF_NAME" \
             ".build/release-assets/CodexNotch-$VERSION.zip" \
+            ".build/release-assets/CodexNotch-$VERSION.zip.sha256" \
             ".build/release-assets/appcast.xml" \
             --generate-notes \
             --title "Codex Notch $VERSION"
