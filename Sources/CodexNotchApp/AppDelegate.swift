@@ -20,7 +20,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         try? SMAppService.mainApp.register()
 
-        overlay.onOpen = { [weak self] index in self?.openTask(at: index) }
+        overlay.onOpen = { [weak self] task in self?.activate(task) ?? false }
+        overlay.onOpenFinished = { [weak self] task in self?.removeOpenedTask(task) }
         overlay.onDismiss = { [weak self] index in self?.dismissTask(at: index) }
         overlay.onClear = { [weak self] in self?.store.removeAll() }
         overlay.onSettings = { [weak self] in self?.showOnboarding() }
@@ -41,7 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .toggle:
                 if self?.overlay.hasContent == true { self?.overlay.toggle() }
                 else { self?.showOnboarding() }
-            case .open(let index): self?.openTask(at: index)
+            case .open(let index): self?.overlay.openTask(at: index)
             case .dismiss(let index): self?.dismissTask(at: index)
             }
         }
@@ -121,27 +122,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         onboarding?.present()
     }
 
-    private func openTask(at index: Int) {
-        guard store.tasks.indices.contains(index) else { return }
-        let task = store.tasks[index]
+    private func activate(_ task: CompletedTask) -> Bool {
         if task.sourceID == "local" {
             guard NSWorkspace.shared.open(task.url) else {
                 NSSound.beep()
-                return
+                return false
             }
         } else {
             guard let host = pairings.host(id: task.sourceID) else {
                 NSSound.beep()
-                return
+                return false
             }
             do { try pairer.openSession(task.threadID, on: host) }
             catch {
                 NSSound.beep()
-                return
+                return false
             }
         }
+        return true
+    }
+
+    private func removeOpenedTask(_ task: CompletedTask) {
+        guard let index = store.tasks.firstIndex(where: { $0.eventID == task.eventID }) else { return }
         store.remove(at: index)
-        overlay.hide()
     }
 
     private func dismissTask(at index: Int) {
