@@ -97,7 +97,7 @@ final class CodexNotchTests: XCTestCase {
                 eventID: String(repeating: String(index % 10), count: 64),
                 title: "Task \(index)",
                 url: URL(string: "codex://threads/00000000-0000-0000-0000-\(id)")!,
-                receivedAt: Date()
+                receivedAt: Date(timeIntervalSince1970: TimeInterval(1_700_000_000 + index))
             )
             XCTAssertTrue(try store.add(task))
         }
