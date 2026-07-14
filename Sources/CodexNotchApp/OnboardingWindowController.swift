@@ -17,6 +17,21 @@ final class SettingsWindow: NSWindow {
 final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate, NSWindowDelegate {
     static let completionKey = "onboardingComplete.v2"
 
+    static func versionDescription(
+        info: [String: Any] = Bundle.main.infoDictionary ?? [:]
+    ) -> String {
+        let version = info["CFBundleShortVersionString"] as? String
+        let build = info["CFBundleVersion"] as? String
+        switch (version, build) {
+        case let (version?, build?) where !version.isEmpty && !build.isEmpty:
+            return "Version \(version) (\(build))"
+        case let (version?, _) where !version.isEmpty:
+            return "Version \(version)"
+        default:
+            return "Version unavailable"
+        }
+    }
+
     private let pairings: PairingStore
     private let pairer: RemoteHostPairer
     private let root = NSVisualEffectView()
@@ -110,13 +125,15 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         install.title = "Install local completion hook"
         stylePrimaryButton(install)
         let uninstall = makeUninstallButton()
+        let version = makeVersionLabel()
         statusLabel.stringValue = ""
         configureStatusLabel()
 
-        let stack = NSStackView(views: [icon, title, subtitle, install, statusLabel, uninstall])
+        let stack = NSStackView(views: [icon, title, subtitle, install, statusLabel, uninstall, version])
         configureStack(stack)
         stack.setCustomSpacing(9, after: title)
         stack.setCustomSpacing(34, after: subtitle)
+        stack.setCustomSpacing(8, after: uninstall)
         content.addSubview(stack)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: content.leadingAnchor),
@@ -156,6 +173,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         }
         done.title = "Hook trusted"
         stylePrimaryButton(done)
+        let version = makeVersionLabel()
 
         let buttons = NSStackView(views: [review, done])
         buttons.orientation = .horizontal
@@ -164,7 +182,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         statusLabel.stringValue = ""
         configureStatusLabel()
 
-        let stack = NSStackView(views: [icon, title, subtitle, buttons, statusLabel])
+        let stack = NSStackView(views: [icon, title, subtitle, buttons, statusLabel, version])
         configureStack(stack)
         stack.setCustomSpacing(9, after: title)
         stack.setCustomSpacing(34, after: subtitle)
@@ -229,9 +247,11 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
 
         let uninstall = makeUninstallButton()
         let spacer = NSView()
-        let footer = NSStackView(views: [uninstall, spacer, done])
+        let version = makeVersionLabel()
+        let footer = NSStackView(views: [uninstall, spacer, version, done])
         footer.orientation = .horizontal
         footer.alignment = .centerY
+        footer.spacing = 12
         statusLabel.stringValue = ""
         configureStatusLabel()
 
@@ -452,6 +472,17 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         let label = NSTextField(labelWithString: text)
         label.font = .systemFont(ofSize: size, weight: weight)
         label.textColor = color
+        return label
+    }
+
+    private func makeVersionLabel() -> NSTextField {
+        let label = makeLabel(
+            Self.versionDescription(),
+            size: 11,
+            weight: .regular,
+            color: NSColor.white.withAlphaComponent(0.34)
+        )
+        label.toolTip = "Installed Codex Notch version"
         return label
     }
 

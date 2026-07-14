@@ -167,11 +167,11 @@ copy is stored outside Git at
 To publish a release after the Apple secrets are configured:
 
 ```sh
-./prepare-release.sh 0.3.5
+./prepare-release.sh 0.3.6
 git add AppResources/Info.plist
-git commit -m 'Prepare 0.3.5 release'
-git tag v0.3.5
-git push origin main v0.3.5
+git commit -m 'Prepare 0.3.6 release'
+git tag v0.3.6
+git push origin main v0.3.6
 ```
 
 The tag workflow builds and signs the complete app, notarizes and staples it,
