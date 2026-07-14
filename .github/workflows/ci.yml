@@ -23,6 +23,6 @@ jobs:
       - uses: actions/checkout@v7
       - name: Test Swift package
         timeout-minutes: 5
-        run: swift test --parallel --num-workers 4
+        run: swift test
       - name: Build app bundle
         run: ./build-macos-app.sh

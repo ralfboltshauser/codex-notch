@@ -1216,7 +1216,16 @@ final class CodexNotchTests: XCTestCase {
             "token": token,
             "snapshot": snapshotObject,
         ])
-        let activeAcknowledgement = try socketRoundTrip(activePayload, port: port.rawValue)
+        let activeAcknowledgementExpectation = expectation(description: "Active snapshot acknowledgement")
+        var activeAcknowledgementResult: Result<RemoteAcknowledgement, Error>?
+        DispatchQueue.global().async {
+            activeAcknowledgementResult = Result {
+                try self.socketRoundTrip(activePayload, port: port.rawValue)
+            }
+            activeAcknowledgementExpectation.fulfill()
+        }
+        wait(for: [activeAcknowledgementExpectation], timeout: 2)
+        let activeAcknowledgement = try XCTUnwrap(activeAcknowledgementResult).get()
         XCTAssertEqual(activeAcknowledgement.status, "accepted")
         XCTAssertEqual(receivedSnapshot, snapshot)
 
