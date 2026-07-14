@@ -64,6 +64,8 @@ struct CompletedTask: Codable, Equatable {
 }
 
 final class TaskStore {
+    static let maximumTaskCount = 10
+
     private let fileURL: URL
     private(set) var tasks: [CompletedTask]
     var onChange: (([CompletedTask]) -> Void)?
@@ -72,7 +74,7 @@ final class TaskStore {
         self.fileURL = fileURL
         if let data = try? Data(contentsOf: fileURL),
            let decoded = try? JSONDecoder.codexNotch.decode([CompletedTask].self, from: data) {
-            tasks = Array(decoded.prefix(9))
+            tasks = Array(decoded.prefix(Self.maximumTaskCount))
         } else {
             tasks = []
         }
@@ -83,7 +85,7 @@ final class TaskStore {
         guard !tasks.contains(where: { $0.eventID == task.eventID }) else { return false }
         var updated = tasks.filter { $0.threadID != task.threadID }
         updated.insert(task, at: 0)
-        updated = Array(updated.prefix(9))
+        updated = Array(updated.prefix(Self.maximumTaskCount))
         try persist(updated)
         tasks = updated
         onChange?(tasks)

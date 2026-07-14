@@ -369,14 +369,17 @@ final class TaskRowView: NSView {
         source.translatesAutoresizingMaskIntoConstraints = false
         source.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
 
-        let shortcut = NSTextField(labelWithString: "⌃⇧\(index + 1)")
+        let shortcut = NSTextField(
+            labelWithString: GlobalHotKeys.openShortcutLabel(at: index) ?? ""
+        )
         shortcut.font = .monospacedSystemFont(ofSize: 10.5, weight: .medium)
         shortcut.textColor = NSColor.white.withAlphaComponent(0.52)
         shortcut.translatesAutoresizingMaskIntoConstraints = false
 
         dismissButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Dismiss task")
         dismissButton.contentTintColor = NSColor.white.withAlphaComponent(0.66)
-        dismissButton.toolTip = "Dismiss — ⌥⇧\(index + 1)"
+        dismissButton.toolTip = GlobalHotKeys.dismissShortcutLabel(at: index)
+            .map { "Dismiss — \($0)" } ?? "Dismiss"
         dismissButton.alphaValue = 0
         dismissButton.translatesAutoresizingMaskIntoConstraints = false
 
@@ -825,7 +828,7 @@ final class OverlayController {
         count.textColor = NSColor.white.withAlphaComponent(0.56)
         count.translatesAutoresizingMaskIntoConstraints = false
 
-        let toggleHint = NSTextField(labelWithString: "⌃⇧0")
+        let toggleHint = NSTextField(labelWithString: GlobalHotKeys.toggleShortcutLabel())
         toggleHint.font = .monospacedSystemFont(ofSize: 10.5, weight: .medium)
         toggleHint.textColor = NSColor.white.withAlphaComponent(0.52)
         toggleHint.translatesAutoresizingMaskIntoConstraints = false
