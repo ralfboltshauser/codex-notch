@@ -130,21 +130,83 @@ final class CodexNotchTests: XCTestCase {
 
     func testOverlayGeometryAndPresentationModes() {
         _ = NSApplication.shared
-        let overlay = OverlayController()
+        let overlay = OverlayController(shouldReduceMotion: { false })
         overlay.update(tasks: [CompletedTask(
             eventID: String(repeating: "b", count: 64),
             title: String(repeating: "A long finished task title ", count: 8),
             url: URL(string: "codex://threads/\(threadID)")!,
             receivedAt: Date()
         )])
-        XCTAssertEqual(overlay.bodyWidthForTesting, 820, accuracy: 0.5)
-        XCTAssertEqual(overlay.bodyHeightForTesting, 106, accuracy: 0.5)
+        XCTAssertEqual(overlay.bodyWidthForTesting, 680, accuracy: 0.5)
+        XCTAssertEqual(
+            overlay.bodyHeightForTesting,
+            overlay.notchHeightForTesting + 110,
+            accuracy: 0.5
+        )
+        XCTAssertGreaterThanOrEqual(overlay.notchWidthForTesting, 80)
+
+        let view = try! XCTUnwrap(overlay.contentViewForTesting)
+        view.layoutSubtreeIfNeeded()
+        let closedPath = try! XCTUnwrap((view.layer?.mask as? CAShapeLayer)?.path)
+        XCTAssertTrue(closedPath.contains(CGPoint(x: view.bounds.midX, y: view.bounds.maxY - 1)))
+        XCTAssertFalse(closedPath.contains(CGPoint(x: 1, y: view.bounds.maxY - 1)))
+        XCTAssertFalse(closedPath.contains(CGPoint(x: view.bounds.midX, y: 1)))
+
         overlay.toggle()
         XCTAssertTrue(overlay.isPinnedForTesting)
         XCTAssertFalse(overlay.hasHideTimerForTesting)
+        let expandedPath = try! XCTUnwrap((view.layer?.mask as? CAShapeLayer)?.path)
+        XCTAssertTrue(expandedPath.contains(CGPoint(x: view.bounds.midX, y: 1)))
         overlay.hide(immediately: true)
         overlay.showForEvent()
         XCTAssertTrue(overlay.hasHideTimerForTesting)
+        overlay.hide(immediately: true)
+    }
+
+    func testVisibleTaskOpenDefersRemovalUntilHandoffCompletes() {
+        _ = NSApplication.shared
+        let overlay = OverlayController(shouldReduceMotion: { false })
+        let task = CompletedTask(
+            eventID: String(repeating: "c", count: 64),
+            title: "Open with a handoff",
+            url: URL(string: "codex://threads/\(threadID)")!,
+            receivedAt: Date()
+        )
+        overlay.update(tasks: [task])
+
+        var activated: CompletedTask?
+        let finished = expectation(description: "launch handoff finished")
+        overlay.onOpen = { opened in
+            activated = opened
+            return true
+        }
+        overlay.onOpenFinished = { opened in
+            XCTAssertEqual(opened, task)
+            finished.fulfill()
+        }
+
+        overlay.toggle()
+        overlay.openTask(at: 0)
+        XCTAssertEqual(activated, task)
+        XCTAssertTrue(overlay.isLaunchingForTesting)
+        wait(for: [finished], timeout: 1)
+        XCTAssertFalse(overlay.isVisibleForTesting)
+    }
+
+    func testUpdateAvailabilityAddsClickablePersistentContent() {
+        _ = NSApplication.shared
+        let overlay = OverlayController()
+        var clicked = false
+        overlay.onUpdate = { clicked = true }
+
+        overlay.setUpdateAvailable(version: "0.4.0")
+        XCTAssertTrue(overlay.isUpdateAvailableForTesting)
+        XCTAssertTrue(overlay.hasContent)
+        overlay.updateButtonForTesting?.performClick(nil)
+        XCTAssertTrue(clicked)
+
+        overlay.setUpdateAvailable(version: nil)
+        XCTAssertFalse(overlay.hasContent)
         overlay.hide(immediately: true)
     }
 

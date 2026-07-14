@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let store = TaskStore()
     private let pairings = PairingStore()
     private let overlay = OverlayController()
+    private let updater = UpdateCoordinator()
     private var inbox: CompletionInbox?
     private var listener: TailscaleListener?
     private var hotKeys: GlobalHotKeys?
@@ -19,19 +20,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         try? SMAppService.mainApp.register()
 
-        overlay.onOpen = { [weak self] index in self?.openTask(at: index) }
+        overlay.onOpen = { [weak self] task in self?.activate(task) ?? false }
+        overlay.onOpenFinished = { [weak self] task in self?.removeOpenedTask(task) }
         overlay.onDismiss = { [weak self] index in self?.dismissTask(at: index) }
         overlay.onClear = { [weak self] in self?.store.removeAll() }
         overlay.onSettings = { [weak self] in self?.showOnboarding() }
+        overlay.onUpdate = { [weak self] in
+            self?.overlay.hide()
+            NSApp.activate(ignoringOtherApps: true)
+            self?.updater.installAvailableUpdate()
+        }
+        updater.onAvailabilityChanged = { [weak self] version in
+            self?.overlay.setUpdateAvailable(version: version)
+        }
         store.onChange = { [weak self] tasks in self?.overlay.update(tasks: tasks) }
         overlay.update(tasks: store.tasks)
+        updater.start()
 
         hotKeys = GlobalHotKeys { [weak self] action in
             switch action {
             case .toggle:
-                if self?.store.tasks.isEmpty == false { self?.overlay.toggle() }
+                if self?.overlay.hasContent == true { self?.overlay.toggle() }
                 else { self?.showOnboarding() }
-            case .open(let index): self?.openTask(at: index)
+            case .open(let index): self?.overlay.openTask(at: index)
             case .dismiss(let index): self?.dismissTask(at: index)
             }
         }
@@ -50,6 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] _ in
             self?.startRemoteListener()
             self?.scheduleRemoteCatchUp()
+            self?.updater.checkForUpdateInformation()
         }
 
         if !CodexHookInstaller().isInstalled
@@ -110,27 +122,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         onboarding?.present()
     }
 
-    private func openTask(at index: Int) {
-        guard store.tasks.indices.contains(index) else { return }
-        let task = store.tasks[index]
+    private func activate(_ task: CompletedTask) -> Bool {
         if task.sourceID == "local" {
             guard NSWorkspace.shared.open(task.url) else {
                 NSSound.beep()
-                return
+                return false
             }
         } else {
             guard let host = pairings.host(id: task.sourceID) else {
                 NSSound.beep()
-                return
+                return false
             }
             do { try pairer.openSession(task.threadID, on: host) }
             catch {
                 NSSound.beep()
-                return
+                return false
             }
         }
+        return true
+    }
+
+    private func removeOpenedTask(_ task: CompletedTask) {
+        guard let index = store.tasks.firstIndex(where: { $0.eventID == task.eventID }) else { return }
         store.remove(at: index)
-        overlay.hide()
     }
 
     private func dismissTask(at index: Int) {

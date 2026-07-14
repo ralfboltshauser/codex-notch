@@ -1,6 +1,13 @@
 import AppKit
 import QuartzCore
 
+private enum NotchMotion {
+    static let easeOut = CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1)
+    static let eventOpenDuration: TimeInterval = 0.24
+    static let closeDuration: TimeInterval = 0.17
+    static let launchDuration: TimeInterval = 0.18
+}
+
 final class FocuslessPanel: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
@@ -28,10 +35,17 @@ final class HUDContentView: NSView {
 
     var onHoverChanged: ((Bool) -> Void)?
     var controls: [NSView] = []
-    var shoulderHeight: CGFloat = 32 { didSet { needsLayout = true } }
-    var shoulderInset: CGFloat = 34 { didSet { needsLayout = true } }
+    var bodyInset: CGFloat = 34 { didSet { needsLayout = true } }
+    var notchWidth: CGFloat = 128 { didSet { needsLayout = true } }
+    var notchHeight: CGFloat = 28 { didSet { needsLayout = true } }
+    var notchCenterOffset: CGFloat = 0 { didSet { needsLayout = true } }
+
     private var tracking: NSTrackingArea?
     private let shapeMask = CAShapeLayer()
+    private var targetExpansion: CGFloat = 0
+    private weak var contentHost: NSView?
+    private weak var headerView: NSView?
+    private var taskRows: [TaskRowView] = []
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -44,55 +58,197 @@ final class HUDContentView: NSView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    override func layout() {
-        super.layout()
-        let path = islandPath(in: bounds)
-        shapeMask.frame = bounds
-        shapeMask.path = path
+    func configureMotion(contentHost: NSView, header: NSView, rows: [TaskRowView]) {
+        self.contentHost = contentHost
+        headerView = header
+        taskRows = rows
+        contentHost.wantsLayer = true
+        header.wantsLayer = true
+        rows.forEach { $0.wantsLayer = true }
     }
 
-    private func islandPath(in rect: NSRect) -> CGPath {
-        let path = CGMutablePath()
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        shapeMask.frame = bounds
+        shapeMask.path = islandPath(in: bounds, expansion: targetExpansion)
+        CATransaction.commit()
+    }
+
+    func setInitialState(expanded: Bool) {
+        targetExpansion = expanded ? 1 : 0
+        layoutSubtreeIfNeeded()
+        let opacity: Float = expanded ? 1 : 0
+        let transform = expanded
+            ? CATransform3DIdentity
+            : CATransform3DMakeTranslation(0, 6, 0)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        shapeMask.removeAllAnimations()
+        shapeMask.path = islandPath(in: bounds, expansion: targetExpansion)
+        contentHost?.layer?.removeAllAnimations()
+        contentHost?.layer?.opacity = opacity
+        contentHost?.layer?.transform = transform
+        CATransaction.commit()
+    }
+
+    func animateExpansion(expanded: Bool, duration: TimeInterval) {
+        layoutSubtreeIfNeeded()
+        let target: CGFloat = expanded ? 1 : 0
+        let targetPath = islandPath(in: bounds, expansion: target)
+        let currentPath = shapeMask.presentation()?.path ?? shapeMask.path ?? targetPath
+        targetExpansion = target
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        shapeMask.path = targetPath
+        CATransaction.commit()
+
+        shapeMask.removeAnimation(forKey: "notchShape")
+        let animation = CABasicAnimation(keyPath: "path")
+        animation.fromValue = currentPath
+        animation.toValue = targetPath
+        animation.duration = duration
+        animation.timingFunction = NotchMotion.easeOut
+        shapeMask.add(animation, forKey: "notchShape")
+    }
+
+    func animateContentIn(duration: TimeInterval) {
+        guard let contentHost else { return }
+        animate(
+            view: contentHost,
+            opacity: 1,
+            transform: CATransform3DIdentity,
+            duration: duration
+        )
+    }
+
+    func animateContentOut(duration: TimeInterval) {
+        guard let contentHost else { return }
+        animate(
+            view: contentHost,
+            opacity: 0,
+            transform: CATransform3DMakeTranslation(0, 4, 0),
+            duration: duration
+        )
+    }
+
+    func animateLaunch(selectedRow: TaskRowView?) {
+        if let headerView {
+            animate(
+                view: headerView,
+                opacity: 0,
+                transform: CATransform3DMakeTranslation(0, 3, 0),
+                duration: 0.07
+            )
+        }
+        taskRows.forEach { $0.animateForLaunch(selected: $0 === selectedRow) }
+    }
+
+    private func animate(
+        view: NSView,
+        opacity: Float,
+        transform: CATransform3D,
+        duration: TimeInterval
+    ) {
+        guard let layer = view.layer else { return }
+        let currentOpacity = layer.presentation()?.opacity ?? layer.opacity
+        let currentTransform = layer.presentation()?.transform ?? layer.transform
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.opacity = opacity
+        layer.transform = transform
+        CATransaction.commit()
+
+        layer.removeAnimation(forKey: "notchContent")
+        let opacityAnimation = CABasicAnimation(keyPath: "opacity")
+        opacityAnimation.fromValue = currentOpacity
+        opacityAnimation.toValue = opacity
+        let transformAnimation = CABasicAnimation(keyPath: "transform")
+        transformAnimation.fromValue = currentTransform
+        transformAnimation.toValue = transform
+
+        let group = CAAnimationGroup()
+        group.animations = [opacityAnimation, transformAnimation]
+        group.duration = duration
+        group.timingFunction = NotchMotion.easeOut
+        layer.add(group, forKey: "notchContent")
+    }
+
+    private func islandPath(in rect: NSRect, expansion: CGFloat) -> CGPath {
+        let progress = min(1, max(0, expansion))
         let width = rect.width
         let height = rect.height
-        // Put the mathematical edge outside the clipped layer. An edge exactly
-        // at maxY gets anti-aliased into a one-pixel gray seam on bright desktops.
         let top = height + 2
-        let inset = min(shoulderInset, width / 4)
-        let shoulderBottom = max(32, height - shoulderHeight)
-        let bottomRadius = min(CGFloat(28), (width - inset * 2) / 4)
-        let left = inset
-        let right = width - inset
+        let center = min(
+            width - notchWidth / 2 - 12,
+            max(notchWidth / 2 + 12, width / 2 + notchCenterOffset)
+        )
+        let neckHalfWidth = min(notchWidth / 2, width / 2 - 20)
+        let neckLeft = center - neckHalfWidth
+        let neckRight = center + neckHalfWidth
+        let neckBottom = max(0, height - notchHeight)
+        let closedRadius = min(CGFloat(10), min(notchHeight * 0.38, neckHalfWidth / 2))
+        let expandedRadius = min(CGFloat(26), (width - bodyInset * 2) / 4)
+        let bottomRadius = interpolate(closedRadius, expandedRadius, progress)
+        let bodyLeft = interpolate(neckLeft, bodyInset, progress)
+        let bodyRight = interpolate(neckRight, width - bodyInset, progress)
+        let bodyBottom = interpolate(neckBottom, 0, progress)
+        let neckEdgeBottom = interpolate(neckBottom + closedRadius, neckBottom + 4, progress)
+        let shoulderBottom = interpolate(
+            neckBottom + closedRadius,
+            max(bodyBottom + bottomRadius, neckBottom - 18),
+            progress
+        )
 
-        // The whole top edge is black and clipped by the display boundary. The
-        // body then narrows through these shoulders, like one oversized notch.
-        path.move(to: CGPoint(x: 0, y: top))
-        path.addLine(to: CGPoint(x: width, y: top))
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: neckLeft, y: top))
+        path.addLine(to: CGPoint(x: neckRight, y: top))
+        path.addLine(to: CGPoint(x: neckRight, y: neckEdgeBottom))
         path.addCurve(
-            to: CGPoint(x: right, y: shoulderBottom),
-            control1: CGPoint(x: width - inset * 0.52, y: top),
-            control2: CGPoint(x: right, y: height - shoulderHeight * 0.46)
+            to: CGPoint(x: bodyRight, y: shoulderBottom),
+            control1: CGPoint(
+                x: neckRight,
+                y: interpolate(neckEdgeBottom, neckBottom - 2, progress)
+            ),
+            control2: CGPoint(
+                x: bodyRight,
+                y: shoulderBottom + 8 * progress
+            )
         )
-        path.addLine(to: CGPoint(x: right, y: bottomRadius))
+        path.addLine(to: CGPoint(x: bodyRight, y: bodyBottom + bottomRadius))
         path.addCurve(
-            to: CGPoint(x: right - bottomRadius, y: 0),
-            control1: CGPoint(x: right, y: bottomRadius * 0.45),
-            control2: CGPoint(x: right - bottomRadius * 0.45, y: 0)
+            to: CGPoint(x: bodyRight - bottomRadius, y: bodyBottom),
+            control1: CGPoint(x: bodyRight, y: bodyBottom + bottomRadius * 0.45),
+            control2: CGPoint(x: bodyRight - bottomRadius * 0.45, y: bodyBottom)
         )
-        path.addLine(to: CGPoint(x: left + bottomRadius, y: 0))
+        path.addLine(to: CGPoint(x: bodyLeft + bottomRadius, y: bodyBottom))
         path.addCurve(
-            to: CGPoint(x: left, y: bottomRadius),
-            control1: CGPoint(x: left + bottomRadius * 0.45, y: 0),
-            control2: CGPoint(x: left, y: bottomRadius * 0.45)
+            to: CGPoint(x: bodyLeft, y: bodyBottom + bottomRadius),
+            control1: CGPoint(x: bodyLeft + bottomRadius * 0.45, y: bodyBottom),
+            control2: CGPoint(x: bodyLeft, y: bodyBottom + bottomRadius * 0.45)
         )
-        path.addLine(to: CGPoint(x: left, y: shoulderBottom))
+        path.addLine(to: CGPoint(x: bodyLeft, y: shoulderBottom))
         path.addCurve(
-            to: CGPoint(x: 0, y: top),
-            control1: CGPoint(x: left, y: height - shoulderHeight * 0.46),
-            control2: CGPoint(x: inset * 0.52, y: top)
+            to: CGPoint(x: neckLeft, y: neckEdgeBottom),
+            control1: CGPoint(
+                x: bodyLeft,
+                y: shoulderBottom + 8 * progress
+            ),
+            control2: CGPoint(
+                x: neckLeft,
+                y: interpolate(neckEdgeBottom, neckBottom - 2, progress)
+            )
         )
+        path.addLine(to: CGPoint(x: neckLeft, y: top))
         path.closeSubpath()
         return path
+    }
+
+    private func interpolate(_ start: CGFloat, _ end: CGFloat, _ progress: CGFloat) -> CGFloat {
+        start + (end - start) * progress
     }
 
     override func updateTrackingAreas() {
@@ -111,7 +267,8 @@ final class HUDContentView: NSView {
     override func mouseEntered(with event: NSEvent) {
         onHoverChanged?(true)
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.14
+            context.duration = 0.12
+            context.timingFunction = NotchMotion.easeOut
             controls.forEach { $0.animator().alphaValue = 1 }
         }
     }
@@ -119,7 +276,8 @@ final class HUDContentView: NSView {
     override func mouseExited(with event: NSEvent) {
         onHoverChanged?(false)
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.18
+            context.duration = 0.14
+            context.timingFunction = NotchMotion.easeOut
             controls.forEach { $0.animator().alphaValue = 0 }
         }
     }
@@ -135,14 +293,14 @@ final class NumberBadgeView: NSView {
         layer?.cornerCurve = .continuous
 
         let label = NSTextField(labelWithString: "\(number)")
-        label.font = .monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
-        label.textColor = NSColor.white.withAlphaComponent(0.82)
+        label.font = .monospacedDigitSystemFont(ofSize: 11.5, weight: .semibold)
+        label.textColor = NSColor.white.withAlphaComponent(0.86)
         label.alignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
         addSubview(label)
         NSLayoutConstraint.activate([
-            widthAnchor.constraint(equalToConstant: 28),
-            heightAnchor.constraint(equalToConstant: 28),
+            widthAnchor.constraint(equalToConstant: 26),
+            heightAnchor.constraint(equalToConstant: 26),
             label.centerXAnchor.constraint(equalTo: centerXAnchor),
             label.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -0.5),
         ])
@@ -152,23 +310,38 @@ final class NumberBadgeView: NSView {
 }
 
 final class TaskRowView: NSView {
+    let task: CompletedTask
+
     private let openHandler: () -> Void
+    private let shouldReduceMotion: () -> Bool
     private let dismissButton: ClosureButton
     private var tracking: NSTrackingArea?
+    private var isHovered = false
+    private var isTrackingPress = false
+    private var isPressed = false
 
-    init(task: CompletedTask, index: Int, open: @escaping () -> Void, dismiss: @escaping () -> Void) {
+    init(
+        task: CompletedTask,
+        index: Int,
+        shouldReduceMotion: @escaping () -> Bool,
+        open: @escaping () -> Void,
+        dismiss: @escaping () -> Void
+    ) {
+        self.task = task
+        self.shouldReduceMotion = shouldReduceMotion
         openHandler = open
         dismissButton = ClosureButton(handler: dismiss)
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = true
         layer?.cornerRadius = 12
+        layer?.cornerCurve = .continuous
 
         let number = NumberBadgeView(number: index + 1)
 
         let title = NSTextField(labelWithString: task.title)
         title.font = .systemFont(ofSize: 14, weight: .medium)
-        title.textColor = NSColor.white.withAlphaComponent(0.94)
+        title.textColor = NSColor.white.withAlphaComponent(0.95)
         title.lineBreakMode = .byTruncatingTail
         title.maximumNumberOfLines = 1
         title.translatesAutoresizingMaskIntoConstraints = false
@@ -176,25 +349,25 @@ final class TaskRowView: NSView {
 
         let source = NSTextField(labelWithString: task.sourceLabel)
         source.font = .systemFont(ofSize: 10.5, weight: .medium)
-        source.textColor = NSColor.white.withAlphaComponent(0.38)
+        source.textColor = NSColor.white.withAlphaComponent(0.56)
         source.lineBreakMode = .byTruncatingTail
         source.translatesAutoresizingMaskIntoConstraints = false
         source.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
 
         let shortcut = NSTextField(labelWithString: "⌃⇧\(index + 1)")
         shortcut.font = .monospacedSystemFont(ofSize: 10.5, weight: .medium)
-        shortcut.textColor = NSColor.white.withAlphaComponent(0.38)
+        shortcut.textColor = NSColor.white.withAlphaComponent(0.52)
         shortcut.translatesAutoresizingMaskIntoConstraints = false
 
         dismissButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Dismiss task")
-        dismissButton.contentTintColor = NSColor.white.withAlphaComponent(0.62)
+        dismissButton.contentTintColor = NSColor.white.withAlphaComponent(0.66)
         dismissButton.toolTip = "Dismiss — ⌥⇧\(index + 1)"
         dismissButton.alphaValue = 0
         dismissButton.translatesAutoresizingMaskIntoConstraints = false
 
         [number, title, source, shortcut, dismissButton].forEach(addSubview)
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: 48),
+            heightAnchor.constraint(equalToConstant: 46),
             number.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
             number.centerYAnchor.constraint(equalTo: centerYAnchor),
             title.leadingAnchor.constraint(equalTo: number.trailingAnchor, constant: 11),
@@ -214,7 +387,102 @@ final class TaskRowView: NSView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-    override func mouseDown(with event: NSEvent) { openHandler() }
+
+    override func mouseDown(with event: NSEvent) {
+        isTrackingPress = true
+        updatePress(at: event)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard isTrackingPress else { return }
+        updatePress(at: event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard isTrackingPress else { return }
+        let shouldOpen = paddedHitArea.contains(convert(event.locationInWindow, from: nil))
+        isTrackingPress = false
+        setPressed(false)
+        if shouldOpen { openHandler() }
+    }
+
+    private var paddedHitArea: NSRect { bounds.insetBy(dx: -10, dy: -10) }
+
+    private func updatePress(at event: NSEvent) {
+        setPressed(paddedHitArea.contains(convert(event.locationInWindow, from: nil)))
+    }
+
+    private func setPressed(_ pressed: Bool) {
+        guard isPressed != pressed else { return }
+        isPressed = pressed
+        updateAppearance(duration: pressed ? 0.08 : 0.12)
+    }
+
+    private func updateAppearance(duration: TimeInterval) {
+        guard let layer else { return }
+        let targetBackground = NSColor.white.withAlphaComponent(
+            isPressed ? 0.13 : (isHovered ? 0.075 : 0)
+        ).cgColor
+        let targetTransform = isPressed && !shouldReduceMotion()
+            ? CATransform3DMakeScale(0.985, 0.985, 1)
+            : CATransform3DIdentity
+        let currentBackground = layer.presentation()?.backgroundColor
+            ?? layer.backgroundColor
+            ?? NSColor.clear.cgColor
+        let currentTransform = layer.presentation()?.transform ?? layer.transform
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.backgroundColor = targetBackground
+        layer.transform = targetTransform
+        CATransaction.commit()
+
+        layer.removeAnimation(forKey: "rowPress")
+        let background = CABasicAnimation(keyPath: "backgroundColor")
+        background.fromValue = currentBackground
+        background.toValue = targetBackground
+        let transform = CABasicAnimation(keyPath: "transform")
+        transform.fromValue = currentTransform
+        transform.toValue = targetTransform
+        let group = CAAnimationGroup()
+        group.animations = [background, transform]
+        group.duration = duration
+        group.timingFunction = NotchMotion.easeOut
+        layer.add(group, forKey: "rowPress")
+    }
+
+    func animateForLaunch(selected: Bool) {
+        guard let layer else { return }
+        let targetTransform = CATransform3DMakeTranslation(0, selected ? 6 : 3, 0)
+        let currentOpacity = layer.presentation()?.opacity ?? layer.opacity
+        let currentTransform = layer.presentation()?.transform ?? layer.transform
+        let duration: TimeInterval = selected ? 0.12 : 0.07
+        let delay: TimeInterval = selected ? 0.025 : 0
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.opacity = 0
+        layer.transform = targetTransform
+        if selected {
+            layer.backgroundColor = NSColor.white.withAlphaComponent(0.13).cgColor
+        }
+        CATransaction.commit()
+
+        layer.removeAllAnimations()
+        let opacity = CABasicAnimation(keyPath: "opacity")
+        opacity.fromValue = currentOpacity
+        opacity.toValue = 0
+        let transform = CABasicAnimation(keyPath: "transform")
+        transform.fromValue = currentTransform
+        transform.toValue = targetTransform
+        let group = CAAnimationGroup()
+        group.animations = [opacity, transform]
+        group.beginTime = CACurrentMediaTime() + delay
+        group.duration = duration
+        group.fillMode = .backwards
+        group.timingFunction = NotchMotion.easeOut
+        layer.add(group, forKey: "rowLaunch")
+    }
 
     override func resetCursorRects() {
         addCursorRect(bounds, cursor: .pointingHand)
@@ -234,42 +502,90 @@ final class TaskRowView: NSView {
     }
 
     override func mouseEntered(with event: NSEvent) {
-        layer?.backgroundColor = NSColor.white.withAlphaComponent(0.075).cgColor
-        dismissButton.animator().alphaValue = 1
+        isHovered = true
+        updateAppearance(duration: 0.10)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.10
+            context.timingFunction = NotchMotion.easeOut
+            dismissButton.animator().alphaValue = 1
+        }
     }
 
     override func mouseExited(with event: NSEvent) {
-        layer?.backgroundColor = NSColor.clear.cgColor
-        dismissButton.animator().alphaValue = 0
+        isHovered = false
+        if !isPressed { updateAppearance(duration: 0.12) }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.12
+            context.timingFunction = NotchMotion.easeOut
+            dismissButton.animator().alphaValue = 0
+        }
     }
+}
+
+private struct IslandGeometry {
+    let windowWidth: CGFloat
+    let bodyInset: CGFloat
+    let notchWidth: CGFloat
+    let notchHeight: CGFloat
+    let notchCenterOffset: CGFloat
 }
 
 final class OverlayController {
     static let eventVisibilityDuration: TimeInterval = 5
 
+    private enum Phase {
+        case hidden
+        case opening
+        case open
+        case closing
+        case launching
+    }
+
     private let panel: FocuslessPanel
+    private let shouldReduceMotion: () -> Bool
     private var tasks: [CompletedTask] = []
     private var hideTimer: Timer?
     private var targetScreen: NSScreen?
     private var isPinned = false
     private var currentBodyInset: CGFloat = 0
+    private var currentNotchWidth: CGFloat = 0
+    private var currentNotchHeight: CGFloat = 0
     private var transitionID = 0
+    private var phase: Phase = .hidden
+    private var pendingRebuild = false
+    private var updateVersion: String?
+    private weak var updateButton: ClosureButton?
+    private weak var rootView: HUDContentView?
+    private var rowsByEventID: [String: TaskRowView] = [:]
 
-    var onOpen: ((Int) -> Void)?
+    var onOpen: ((CompletedTask) -> Bool)?
+    var onOpenFinished: ((CompletedTask) -> Void)?
     var onDismiss: ((Int) -> Void)?
     var onClear: (() -> Void)?
     var onSettings: (() -> Void)?
+    var onUpdate: (() -> Void)?
     var frameForTesting: NSRect { panel.frame }
     var bodyHeightForTesting: CGFloat { panel.frame.height }
     var bodyWidthForTesting: CGFloat { panel.frame.width - currentBodyInset * 2 }
+    var notchWidthForTesting: CGFloat { currentNotchWidth }
+    var notchHeightForTesting: CGFloat { currentNotchHeight }
     var eventVisibilityDurationForTesting: TimeInterval { Self.eventVisibilityDuration }
     var isPinnedForTesting: Bool { isPinned }
     var hasHideTimerForTesting: Bool { hideTimer?.isValid == true }
     var isVisibleForTesting: Bool { panel.isVisible }
+    var isLaunchingForTesting: Bool { phase == .launching }
     var panelAlphaForTesting: CGFloat { panel.alphaValue }
     var contentViewForTesting: NSView? { panel.contentView }
+    var isUpdateAvailableForTesting: Bool { updateVersion != nil }
+    var updateButtonForTesting: NSButton? { updateButton }
+    var hasContent: Bool { !tasks.isEmpty || updateVersion != nil }
 
-    init() {
+    init(
+        shouldReduceMotion: @escaping () -> Bool = {
+            NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        }
+    ) {
+        self.shouldReduceMotion = shouldReduceMotion
         panel = FocuslessPanel(
             contentRect: .zero,
             styleMask: [.borderless, .nonactivatingPanel],
@@ -290,50 +606,78 @@ final class OverlayController {
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil,
             queue: .main
-        ) { [weak self] _ in self?.positionPanel() }
+        ) { [weak self] _ in self?.screenParametersDidChange() }
     }
 
     func update(tasks: [CompletedTask]) {
         self.tasks = tasks
-        rebuildContent()
-        if tasks.isEmpty { hide(immediately: true) }
-        else if panel.isVisible { positionPanel() }
+        if !hasContent, phase != .launching {
+            hide(immediately: true)
+            rebuildContent(initiallyExpanded: false)
+            return
+        }
+        switch phase {
+        case .opening, .closing, .launching:
+            pendingRebuild = true
+        case .hidden:
+            rebuildContent(initiallyExpanded: false)
+        case .open:
+            rebuildContent(initiallyExpanded: true)
+            positionPanel()
+        }
+    }
+
+    func setUpdateAvailable(version: String?) {
+        let wasAvailable = updateVersion != nil
+        updateVersion = version
+        if !hasContent, phase != .launching {
+            hide(immediately: true)
+            rebuildContent(initiallyExpanded: false)
+            return
+        }
+
+        switch phase {
+        case .opening, .closing, .launching:
+            pendingRebuild = true
+        case .hidden:
+            rebuildContent(initiallyExpanded: false)
+        case .open:
+            rebuildContent(initiallyExpanded: true)
+            positionPanel()
+        }
+
+        if version != nil, !wasAvailable { showForEvent() }
     }
 
     func showForEvent() {
-        guard !tasks.isEmpty else { return }
-        if !panel.isVisible { targetScreen = screenUnderPointer() }
-        let remainsPinned = panel.isVisible && isPinned
-        present(autoHide: !remainsPinned)
-    }
-
-    private func present(autoHide: Bool) {
-        guard !tasks.isEmpty else { return }
-        transitionID &+= 1
-        let wasVisible = panel.isVisible
-        rebuildContent()
-        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        positionPanel()
-        hideTimer?.invalidate()
-
-        if !wasVisible {
-            // The island must always composite as literal black. Fading the
-            // panel would blend it with the desktop and turn it gray.
-            panel.alphaValue = 1
-            panel.orderFrontRegardless()
-            if !reduceMotion { animateContentTranslation(from: 18, to: 0, duration: 0.20) }
+        guard hasContent else { return }
+        if phase == .hidden { targetScreen = screenUnderPointer() }
+        if phase == .open || phase == .opening {
+            if !isPinned { scheduleHide(after: Self.eventVisibilityDuration) }
+            return
         }
-        if autoHide { scheduleHide(after: Self.eventVisibilityDuration) }
+        present(autoHide: !isPinned, duration: NotchMotion.eventOpenDuration)
     }
 
     func toggle() {
-        if panel.isVisible {
-            hide()
-        } else {
+        switch phase {
+        case .hidden:
             targetScreen = screenUnderPointer()
             isPinned = true
-            present(autoHide: false)
+            present(autoHide: false, duration: 0)
+        case .closing:
+            isPinned = true
+            present(autoHide: false, duration: 0)
+        case .launching:
+            break
+        case .opening, .open:
+            hide(immediately: true)
         }
+    }
+
+    func openTask(at index: Int) {
+        guard tasks.indices.contains(index) else { return }
+        openTask(tasks[index])
     }
 
     func hide(immediately: Bool = false) {
@@ -341,30 +685,108 @@ final class OverlayController {
         isPinned = false
         transitionID &+= 1
         let hidingTransitionID = transitionID
-        guard panel.isVisible else { return }
-        if immediately {
+        guard phase != .hidden || panel.isVisible else { return }
+
+        if immediately || shouldReduceMotion() {
+            rootView?.setInitialState(expanded: false)
             panel.orderOut(nil)
+            phase = .hidden
+            finishPendingRebuild(expanded: false)
             return
         }
-        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        guard !reduceMotion else {
-            panel.orderOut(nil)
-            return
-        }
-        animateContentTranslation(from: 0, to: 12, duration: 0.15)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+        guard phase != .launching else { return }
+
+        phase = .closing
+        rootView?.animateContentOut(duration: 0.10)
+        rootView?.animateExpansion(expanded: false, duration: NotchMotion.closeDuration)
+        DispatchQueue.main.asyncAfter(deadline: .now() + NotchMotion.closeDuration) { [weak self] in
             guard let self, self.transitionID == hidingTransitionID else { return }
             self.panel.orderOut(nil)
+            self.phase = .hidden
+            self.finishPendingRebuild(expanded: false)
         }
     }
 
-    private func rebuildContent() {
+    private func present(autoHide: Bool, duration: TimeInterval) {
+        guard hasContent else { return }
+        if phase == .open || phase == .opening {
+            if autoHide { scheduleHide(after: Self.eventVisibilityDuration) }
+            return
+        }
+
+        transitionID &+= 1
+        let presentingTransitionID = transitionID
+        let wasHidden = phase == .hidden || !panel.isVisible
+        if rootView == nil { rebuildContent(initiallyExpanded: false) }
+        positionPanel()
+        hideTimer?.invalidate()
+        panel.alphaValue = 1
+        if wasHidden { panel.orderFrontRegardless() }
+
+        let shouldAnimate = duration > 0 && !shouldReduceMotion()
+        phase = .opening
+        if shouldAnimate {
+            rootView?.animateExpansion(expanded: true, duration: duration)
+            rootView?.animateContentIn(duration: min(0.16, duration))
+        } else {
+            rootView?.setInitialState(expanded: true)
+            phase = .open
+            finishPendingRebuild(expanded: true)
+        }
+
+        if shouldAnimate {
+            DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
+                guard let self, self.transitionID == presentingTransitionID else { return }
+                self.phase = .open
+                self.finishPendingRebuild(expanded: true)
+            }
+        }
+        if autoHide { scheduleHide(after: Self.eventVisibilityDuration) }
+    }
+
+    private func openTask(_ task: CompletedTask) {
+        guard phase != .launching, onOpen?(task) == true else { return }
+        guard phase != .hidden else {
+            onOpenFinished?(task)
+            return
+        }
+
+        transitionID &+= 1
+        let launchTransitionID = transitionID
+        hideTimer?.invalidate()
+        isPinned = false
+        phase = .launching
+
+        if shouldReduceMotion() {
+            panel.orderOut(nil)
+            phase = .hidden
+            onOpenFinished?(task)
+            return
+        }
+
+        rootView?.animateLaunch(selectedRow: rowsByEventID[task.eventID])
+        rootView?.animateExpansion(expanded: false, duration: NotchMotion.launchDuration)
+        DispatchQueue.main.asyncAfter(deadline: .now() + NotchMotion.launchDuration) { [weak self] in
+            guard let self, self.transitionID == launchTransitionID else { return }
+            self.panel.orderOut(nil)
+            self.phase = .hidden
+            self.pendingRebuild = false
+            self.onOpenFinished?(task)
+        }
+    }
+
+    private func rebuildContent(initiallyExpanded: Bool) {
         let screen = targetScreen ?? screenUnderPointer()
         let geometry = islandGeometry(for: screen)
-        currentBodyInset = geometry.shoulderInset
+        currentBodyInset = geometry.bodyInset
+        currentNotchWidth = geometry.notchWidth
+        currentNotchHeight = geometry.notchHeight
+
         let root = HUDContentView()
-        root.shoulderHeight = geometry.shoulderHeight
-        root.shoulderInset = geometry.shoulderInset
+        root.bodyInset = geometry.bodyInset
+        root.notchWidth = geometry.notchWidth
+        root.notchHeight = geometry.notchHeight
+        root.notchCenterOffset = geometry.notchCenterOffset
 
         let codexIcon = NSImageView(image: NSImage(
             systemSymbolName: "checkmark.circle.fill",
@@ -373,51 +795,70 @@ final class OverlayController {
         codexIcon.contentTintColor = NSColor(calibratedRed: 0.40, green: 0.91, blue: 0.71, alpha: 1)
         codexIcon.translatesAutoresizingMaskIntoConstraints = false
 
-        let heading = NSTextField(labelWithString: "CODEX")
-        heading.font = .systemFont(ofSize: 11, weight: .bold)
-        heading.textColor = NSColor.white.withAlphaComponent(0.72)
+        let heading = NSTextField(labelWithString: "Codex")
+        heading.font = .systemFont(ofSize: 13, weight: .semibold)
+        heading.textColor = NSColor.white.withAlphaComponent(0.92)
         heading.translatesAutoresizingMaskIntoConstraints = false
 
-        let count = NSTextField(labelWithString: "\(tasks.count) READY")
-        count.font = .monospacedDigitSystemFont(ofSize: 9.5, weight: .medium)
-        count.textColor = NSColor.white.withAlphaComponent(0.32)
+        let countText = tasks.isEmpty && updateVersion != nil
+            ? "Update ready"
+            : "\(tasks.count) completed"
+        let count = NSTextField(labelWithString: countText)
+        count.font = .systemFont(ofSize: 11, weight: .medium)
+        count.textColor = NSColor.white.withAlphaComponent(0.56)
         count.translatesAutoresizingMaskIntoConstraints = false
 
         let toggleHint = NSTextField(labelWithString: "⌃⇧0")
         toggleHint.font = .monospacedSystemFont(ofSize: 10.5, weight: .medium)
-        toggleHint.textColor = NSColor.white.withAlphaComponent(0.38)
+        toggleHint.textColor = NSColor.white.withAlphaComponent(0.52)
         toggleHint.translatesAutoresizingMaskIntoConstraints = false
 
         let clear = ClosureButton { [weak self] in self?.onClear?() }
         clear.title = "Clear"
         clear.font = .systemFont(ofSize: 11, weight: .medium)
-        clear.contentTintColor = NSColor.white.withAlphaComponent(0.62)
+        clear.contentTintColor = NSColor.white.withAlphaComponent(0.66)
         clear.toolTip = "Dismiss all tasks"
         clear.alphaValue = 0
         clear.translatesAutoresizingMaskIntoConstraints = false
         let settings = ClosureButton { [weak self] in self?.onSettings?() }
         settings.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings")
-        settings.contentTintColor = NSColor.white.withAlphaComponent(0.62)
+        settings.contentTintColor = NSColor.white.withAlphaComponent(0.66)
         settings.toolTip = "Connection settings"
         settings.alphaValue = 0
         settings.translatesAutoresizingMaskIntoConstraints = false
+
+        let update = ClosureButton { [weak self] in self?.onUpdate?() }
+        update.image = NSImage(
+            systemSymbolName: "arrow.down.circle.fill",
+            accessibilityDescription: "Install Codex Notch update"
+        )
+        update.contentTintColor = NSColor(calibratedRed: 0.40, green: 0.91, blue: 0.71, alpha: 1)
+        update.toolTip = updateVersion.map { "Install Codex Notch \($0)" }
+        update.translatesAutoresizingMaskIntoConstraints = false
+        update.isHidden = updateVersion == nil
+        updateButton = update
+        clear.isHidden = tasks.isEmpty
         root.controls = [clear, settings]
 
         let header = NSView()
         header.translatesAutoresizingMaskIntoConstraints = false
-        [codexIcon, heading, count, toggleHint, clear, settings].forEach(header.addSubview)
+        [codexIcon, heading, count, toggleHint, clear, update, settings].forEach(header.addSubview)
         NSLayoutConstraint.activate([
-            header.heightAnchor.constraint(equalToConstant: 44),
+            header.heightAnchor.constraint(equalToConstant: 36),
             codexIcon.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 13),
             codexIcon.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-            codexIcon.widthAnchor.constraint(equalToConstant: 17),
-            codexIcon.heightAnchor.constraint(equalToConstant: 17),
+            codexIcon.widthAnchor.constraint(equalToConstant: 16),
+            codexIcon.heightAnchor.constraint(equalToConstant: 16),
             heading.leadingAnchor.constraint(equalTo: codexIcon.trailingAnchor, constant: 8),
             heading.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             count.leadingAnchor.constraint(equalTo: heading.trailingAnchor, constant: 8),
             count.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             clear.leadingAnchor.constraint(greaterThanOrEqualTo: count.trailingAnchor, constant: 12),
-            settings.leadingAnchor.constraint(equalTo: clear.trailingAnchor, constant: 6),
+            update.leadingAnchor.constraint(equalTo: clear.trailingAnchor, constant: 6),
+            update.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            update.widthAnchor.constraint(equalToConstant: 24),
+            update.heightAnchor.constraint(equalToConstant: 24),
+            settings.leadingAnchor.constraint(equalTo: update.trailingAnchor, constant: 4),
             toggleHint.leadingAnchor.constraint(equalTo: settings.trailingAnchor, constant: 10),
             toggleHint.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -10),
             toggleHint.centerYAnchor.constraint(equalTo: header.centerYAnchor),
@@ -434,29 +875,35 @@ final class OverlayController {
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.addArrangedSubview(header)
 
+        var rows: [TaskRowView] = []
+        var rowLookup: [String: TaskRowView] = [:]
         for (index, task) in tasks.enumerated() {
             let row = TaskRowView(
                 task: task,
                 index: index,
-                open: { [weak self] in self?.onOpen?(index) },
+                shouldReduceMotion: shouldReduceMotion,
+                open: { [weak self] in self?.openTask(task) },
                 dismiss: { [weak self] in self?.onDismiss?(index) }
             )
+            rows.append(row)
+            rowLookup[task.eventID] = row
             stack.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
 
         root.addSubview(stack)
+        let contentTopInset = geometry.notchHeight + 18
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(
                 equalTo: root.leadingAnchor,
-                constant: geometry.shoulderInset + 7
+                constant: geometry.bodyInset + 7
             ),
             stack.trailingAnchor.constraint(
                 equalTo: root.trailingAnchor,
-                constant: -(geometry.shoulderInset + 7)
+                constant: -(geometry.bodyInset + 7)
             ),
-            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 5),
-            stack.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -7),
+            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: contentTopInset),
+            stack.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -8),
             header.widthAnchor.constraint(equalTo: stack.widthAnchor),
         ])
         root.onHoverChanged = { [weak self] hovering in
@@ -465,32 +912,29 @@ final class OverlayController {
                 self?.scheduleHide(after: Self.eventVisibilityDuration)
             }
         }
+        root.configureMotion(contentHost: stack, header: header, rows: rows)
+
         panel.contentView = root
-        let height = CGFloat(56 + tasks.count * 50)
+        let height = geometry.notchHeight + 62 + CGFloat(tasks.count * 48)
         let size = NSSize(width: geometry.windowWidth, height: height)
         panel.contentMinSize = size
         panel.contentMaxSize = size
         panel.setContentSize(size)
+        root.layoutSubtreeIfNeeded()
+        root.setInitialState(expanded: initiallyExpanded)
+        rootView = root
+        rowsByEventID = rowLookup
+        pendingRebuild = false
+    }
+
+    private func finishPendingRebuild(expanded: Bool) {
+        guard pendingRebuild else { return }
+        rebuildContent(initiallyExpanded: expanded)
+        if expanded { positionPanel() }
     }
 
     private func positionPanel() {
         panel.setFrameOrigin(visibleOrigin())
-    }
-
-    private func animateContentTranslation(
-        from: CGFloat,
-        to: CGFloat,
-        duration: TimeInterval
-    ) {
-        guard let layer = panel.contentView?.layer else { return }
-        let animation = CABasicAnimation(keyPath: "transform.translation.y")
-        animation.fromValue = from
-        animation.toValue = to
-        animation.duration = duration
-        animation.timingFunction = CAMediaTimingFunction(
-            name: to == 0 ? .easeOut : .easeIn
-        )
-        layer.add(animation, forKey: "notchTranslation")
     }
 
     private func visibleOrigin() -> NSPoint {
@@ -502,25 +946,47 @@ final class OverlayController {
         )
     }
 
-    private func islandGeometry(
-        for screen: NSScreen
-    ) -> (windowWidth: CGFloat, shoulderInset: CGFloat, shoulderHeight: CGFloat) {
-        let menuOrNotchHeight = max(
-            screen.safeAreaInsets.top,
-            screen.frame.maxY - screen.visibleFrame.maxY
-        )
-        let shoulderInset: CGFloat = 34
-        let bodyWidth = min(820, max(460, screen.frame.width - 160))
-        return (
-            windowWidth: bodyWidth + shoulderInset * 2,
-            shoulderInset: shoulderInset,
-            shoulderHeight: max(28, menuOrNotchHeight)
+    private func islandGeometry(for screen: NSScreen) -> IslandGeometry {
+        let menuHeight = screen.frame.maxY - screen.visibleFrame.maxY
+        let safeTop = screen.safeAreaInsets.top
+        let notchHeight = max(CGFloat(28), max(safeTop, menuHeight))
+        let leftArea = screen.auxiliaryTopLeftArea
+        let rightArea = screen.auxiliaryTopRightArea
+        var notchWidth: CGFloat = 128
+        var centerOffset: CGFloat = 0
+        if let leftArea, let rightArea {
+            let measuredGap = rightArea.minX - leftArea.maxX
+            let hasHardwareNotch = leftArea.width > 0
+                && rightArea.width > 0
+                && measuredGap >= 80
+                && measuredGap <= screen.frame.width * 0.35
+            if hasHardwareNotch {
+                notchWidth = measuredGap
+                centerOffset = (leftArea.maxX + rightArea.minX) / 2 - screen.frame.midX
+            }
+        }
+        let bodyInset: CGFloat = 34
+        let bodyWidth = min(680, max(500, screen.frame.width - 120))
+        return IslandGeometry(
+            windowWidth: bodyWidth + bodyInset * 2,
+            bodyInset: bodyInset,
+            notchWidth: notchWidth,
+            notchHeight: notchHeight,
+            notchCenterOffset: centerOffset
         )
     }
 
     private func screenUnderPointer() -> NSScreen {
         let point = NSEvent.mouseLocation
-        return NSScreen.screens.first(where: { $0.frame.contains(point) }) ?? NSScreen.main ?? NSScreen.screens[0]
+        return NSScreen.screens.first(where: { $0.frame.contains(point) })
+            ?? NSScreen.main
+            ?? NSScreen.screens[0]
+    }
+
+    private func screenParametersDidChange() {
+        let expanded = phase != .hidden && phase != .closing
+        rebuildContent(initiallyExpanded: expanded)
+        positionPanel()
     }
 
     private func scheduleHide(after interval: TimeInterval) {
