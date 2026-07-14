@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test Ubuntu publisher
+        run: python3 -m unittest discover -s Tests/LinuxHookTests -v
+      - name: Check shell syntax
+        run: |
+          for script in *.sh; do sh -n "$script"; done
+      - name: Compile Python
+        run: python3 -m py_compile remote/codex_notch_remote.py
+
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test Swift package
+        run: swift test
+      - name: Build app bundle
+        run: ./build-macos-app.sh

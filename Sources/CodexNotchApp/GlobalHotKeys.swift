@@ -11,7 +11,7 @@ final class GlobalHotKeys {
     private let handler: (Action) -> Void
     private var eventHandler: EventHandlerRef?
     private var registrations: [EventHotKeyRef] = []
-    private let signature: OSType = 0x4E_54_46_59 // NTFY
+    private let signature: OSType = 0x4E_4F_54_43 // NOTC
 
     init(handler: @escaping (Action) -> Void) {
         self.handler = handler

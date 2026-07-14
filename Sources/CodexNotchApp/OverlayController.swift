@@ -174,6 +174,13 @@ final class TaskRowView: NSView {
         title.translatesAutoresizingMaskIntoConstraints = false
         title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
+        let source = NSTextField(labelWithString: task.sourceLabel)
+        source.font = .systemFont(ofSize: 10.5, weight: .medium)
+        source.textColor = NSColor.white.withAlphaComponent(0.38)
+        source.lineBreakMode = .byTruncatingTail
+        source.translatesAutoresizingMaskIntoConstraints = false
+        source.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+
         let shortcut = NSTextField(labelWithString: "⌃⇧\(index + 1)")
         shortcut.font = .monospacedSystemFont(ofSize: 10.5, weight: .medium)
         shortcut.textColor = NSColor.white.withAlphaComponent(0.38)
@@ -185,14 +192,17 @@ final class TaskRowView: NSView {
         dismissButton.alphaValue = 0
         dismissButton.translatesAutoresizingMaskIntoConstraints = false
 
-        [number, title, shortcut, dismissButton].forEach(addSubview)
+        [number, title, source, shortcut, dismissButton].forEach(addSubview)
         NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: 48),
             number.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
             number.centerYAnchor.constraint(equalTo: centerYAnchor),
             title.leadingAnchor.constraint(equalTo: number.trailingAnchor, constant: 11),
             title.centerYAnchor.constraint(equalTo: centerYAnchor),
-            shortcut.leadingAnchor.constraint(greaterThanOrEqualTo: title.trailingAnchor, constant: 10),
+            source.leadingAnchor.constraint(greaterThanOrEqualTo: title.trailingAnchor, constant: 14),
+            source.widthAnchor.constraint(lessThanOrEqualToConstant: 120),
+            source.centerYAnchor.constraint(equalTo: centerYAnchor),
+            shortcut.leadingAnchor.constraint(equalTo: source.trailingAnchor, constant: 12),
             shortcut.centerYAnchor.constraint(equalTo: centerYAnchor),
             dismissButton.leadingAnchor.constraint(equalTo: shortcut.trailingAnchor, constant: 8),
             dismissButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
