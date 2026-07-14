@@ -94,7 +94,7 @@ final class NotificationSoundPlayer: NSObject, NSSoundDelegate {
 }
 
 final class NotificationSoundCardButton: NSButton {
-    let sound: NotificationSound
+    let notificationSound: NotificationSound
     var onSelect: ((NotificationSound) -> Void)?
 
     private let icon: NSImageView
@@ -106,7 +106,7 @@ final class NotificationSoundCardButton: NSButton {
     private var selectedSound = false
 
     init(sound: NotificationSound) {
-        self.sound = sound
+        notificationSound = sound
         icon = NSImageView(image: NSImage(
             systemSymbolName: sound == .none ? "speaker.slash.fill" : "waveform",
             accessibilityDescription: nil
@@ -196,7 +196,7 @@ final class NotificationSoundCardButton: NSButton {
         updateAppearance()
     }
 
-    @objc private func chooseSound() { onSelect?(sound) }
+    @objc private func chooseSound() { onSelect?(notificationSound) }
 
     private func updateAppearance() {
         let accent = NSColor(calibratedRed: 0.40, green: 0.91, blue: 0.71, alpha: 1)
