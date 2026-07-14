@@ -103,6 +103,30 @@ final class RemoteHostPairer {
         }
     }
 
+    func recoverMissingTokens() {
+        let missing = store.hostsMissingTokens
+        guard !missing.isEmpty else { return }
+        DispatchQueue.global(qos: .utility).async {
+            for host in missing {
+                guard let data = try? self.runSSHForOutput(
+                    alias: host.sshAlias,
+                    command: "test -r \"$HOME/.config/codex-notch/remote.json\" && cat \"$HOME/.config/codex-notch/remote.json\""
+                ),
+                let configuration = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                configuration["host_id"] as? String == host.id,
+                let token = configuration["token"] as? String,
+                (try? self.store.saveRecoveredToken(token.lowercased(), forHostID: host.id)) != nil
+                else { continue }
+
+                try? self.runSSH(
+                    alias: host.sshAlias,
+                    command: "\"\(Self.remoteScript)\" --flush",
+                    input: nil
+                )
+            }
+        }
+    }
+
     func unpair(_ host: RemoteHost) throws {
         try? runSSH(
             alias: host.sshAlias,
@@ -112,20 +136,18 @@ final class RemoteHostPairer {
         try store.remove(id: host.id)
     }
 
-    func openSession(_ threadID: String, on host: RemoteHost) throws {
+    func openSession(_ threadID: String) throws {
         guard let canonicalID = UUID(uuidString: threadID)?.uuidString.lowercased() else {
             throw NSError(domain: "CodexNotch", code: 25)
         }
-        try AppPaths.prepareDirectory(AppPaths.applicationSupport)
-        let commandFile = AppPaths.applicationSupport
-            .appendingPathComponent("Resume \(host.id) Session.command")
-        let script = "#!/bin/sh\nprintf '\\033]0;Remote Codex Session\\007'\nexec /usr/bin/ssh -t \(host.sshAlias) codex resume \(canonicalID)\n"
-        try Data(script.utf8).write(to: commandFile, options: .atomic)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o700],
-            ofItemAtPath: commandFile.path
-        )
-        NSWorkspace.shared.open(commandFile)
+        guard let url = URL(string: "codex://threads/\(canonicalID)"),
+              NSWorkspace.shared.open(url) else {
+            throw NSError(
+                domain: "CodexNotch",
+                code: 26,
+                userInfo: [NSLocalizedDescriptionKey: "Codex could not open this task"]
+            )
+        }
     }
 
     func openTrustReview(for host: RemoteHost) throws {
@@ -174,6 +196,36 @@ final class RemoteHostPairer {
                 userInfo: [NSLocalizedDescriptionKey: message.isEmpty ? "SSH command failed" : message]
             )
         }
+    }
+
+    private func runSSHForOutput(alias: String, command: String) throws -> Data {
+        let process = Process()
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
+        process.arguments = [
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=10",
+            alias,
+            command,
+        ]
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = stdout
+        process.standardError = stderr
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            let message = String(
+                decoding: stderr.fileHandleForReading.readDataToEndOfFile(),
+                as: UTF8.self
+            ).trimmingCharacters(in: .whitespacesAndNewlines)
+            throw NSError(
+                domain: "CodexNotch",
+                code: Int(process.terminationStatus),
+                userInfo: [NSLocalizedDescriptionKey: message.isEmpty ? "SSH command failed" : message]
+            )
+        }
+        return stdout.fileHandleForReading.readDataToEndOfFile()
     }
 
     private func randomToken() throws -> String {

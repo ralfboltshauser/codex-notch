@@ -79,7 +79,10 @@ Uninstall it with:
 ## Security and data
 
 - The receiver binds only to the Mac's detected Tailscale IPv4 address.
-- Every remote host gets a separate random token stored in macOS Keychain.
+- Every remote host gets a separate random token stored in a user-only `0600`
+  file under Codex Notch's Application Support directory. The receiver loads
+  tokens into memory at launch, so accepting a completion never invokes a
+  credential UI or blocks on Keychain access.
 - Remote messages cannot provide a URL or command. Thread IDs must be UUIDs,
   and the app constructs the local or SSH action itself.
 - Events contain only thread ID, turn ID, title, source identity, and timestamp.

@@ -1,6 +1,5 @@
 import CodexNotchCore
 import Foundation
-import Security
 
 struct RemoteHost: Codable, Equatable {
     let id: String
@@ -10,65 +9,33 @@ struct RemoteHost: Codable, Equatable {
     let createdAt: Date
 }
 
-enum KeychainStore {
-    private static let service = "com.ralfbuilds.codex-notch.remote-host"
-
-    static func set(_ value: String, account: String) throws {
-        delete(account: account)
-        let status = SecItemAdd([
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
-            kSecValueData as String: Data(value.utf8),
-        ] as CFDictionary, nil)
-        guard status == errSecSuccess else { throw keychainError(status) }
-    }
-
-    static func get(account: String) -> String? {
-        var result: CFTypeRef?
-        let status = SecItemCopyMatching([
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ] as CFDictionary, &result)
-        guard status == errSecSuccess,
-              let data = result as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
-    }
-
-    static func delete(account: String) {
-        SecItemDelete([
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-        ] as CFDictionary)
-    }
-
-    private static func keychainError(_ status: OSStatus) -> NSError {
-        let message = SecCopyErrorMessageString(status, nil).map { $0 as String }
-        return NSError(
-            domain: NSOSStatusErrorDomain,
-            code: Int(status),
-            userInfo: [NSLocalizedDescriptionKey: message ?? "Keychain error"]
-        )
-    }
-}
-
 final class PairingStore {
     private let fileURL: URL
+    private let tokensFileURL: URL
     private let lock = NSLock()
     private var storedHosts: [RemoteHost]
+    private var storedTokens: [String: String]
 
-    init(fileURL: URL = AppPaths.pairingsFile) {
+    init(
+        fileURL: URL = AppPaths.pairingsFile,
+        tokensFileURL: URL? = nil
+    ) {
         self.fileURL = fileURL
+        self.tokensFileURL = tokensFileURL
+            ?? (fileURL == AppPaths.pairingsFile
+                ? AppPaths.pairingTokensFile
+                : fileURL.deletingLastPathComponent().appendingPathComponent("remote-host-tokens.json"))
         if let data = try? Data(contentsOf: fileURL),
            let hosts = try? JSONDecoder.codexNotch.decode([RemoteHost].self, from: data) {
             storedHosts = hosts
         } else {
             storedHosts = []
+        }
+        if let data = try? Data(contentsOf: self.tokensFileURL),
+           let tokens = try? JSONDecoder.codexNotch.decode([String: String].self, from: data) {
+            storedTokens = tokens.filter { Self.isValidToken($0.value) }
+        } else {
+            storedTokens = [:]
         }
     }
 
@@ -82,22 +49,54 @@ final class PairingStore {
         hosts.first { $0.id == id }
     }
 
+    var hostsMissingTokens: [RemoteHost] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedHosts.filter { storedTokens[$0.id] == nil }
+    }
+
     func save(_ host: RemoteHost, token: String) throws {
-        try KeychainStore.set(token, account: host.id)
+        guard Self.isValidToken(token) else { throw invalidTokenError() }
         lock.lock()
         let replacedIDs = storedHosts
             .filter { $0.id != host.id && $0.sshAlias == host.sshAlias }
             .map(\.id)
         var updated = storedHosts.filter { $0.id != host.id && $0.sshAlias != host.sshAlias }
         updated.append(host)
+        var updatedTokens = storedTokens
+        replacedIDs.forEach { updatedTokens.removeValue(forKey: $0) }
+        updatedTokens[host.id] = token
         do {
-            try persist(updated)
+            try persistTokens(updatedTokens)
+            try persistHosts(updated)
             storedHosts = updated
+            storedTokens = updatedTokens
             lock.unlock()
-            replacedIDs.forEach { KeychainStore.delete(account: $0) }
         } catch {
             lock.unlock()
-            KeychainStore.delete(account: host.id)
+            throw error
+        }
+    }
+
+    func saveRecoveredToken(_ token: String, forHostID id: String) throws {
+        guard Self.isValidToken(token) else { throw invalidTokenError() }
+        lock.lock()
+        guard storedHosts.contains(where: { $0.id == id }) else {
+            lock.unlock()
+            throw NSError(
+                domain: "CodexNotch",
+                code: 42,
+                userInfo: [NSLocalizedDescriptionKey: "Cannot save a token for an unknown remote host"]
+            )
+        }
+        var updatedTokens = storedTokens
+        updatedTokens[id] = token
+        do {
+            try persistTokens(updatedTokens)
+            storedTokens = updatedTokens
+            lock.unlock()
+        } catch {
+            lock.unlock()
             throw error
         }
     }
@@ -105,11 +104,14 @@ final class PairingStore {
     func remove(id: String) throws {
         lock.lock()
         let updated = storedHosts.filter { $0.id != id }
+        var updatedTokens = storedTokens
+        updatedTokens.removeValue(forKey: id)
         do {
-            try persist(updated)
+            try persistHosts(updated)
+            try persistTokens(updatedTokens)
             storedHosts = updated
+            storedTokens = updatedTokens
             lock.unlock()
-            KeychainStore.delete(account: id)
         } catch {
             lock.unlock()
             throw error
@@ -117,20 +119,30 @@ final class PairingStore {
     }
 
     func host(authenticating candidate: String) -> RemoteHost? {
-        for host in hosts {
-            guard let token = KeychainStore.get(account: host.id) else { continue }
+        lock.lock()
+        defer { lock.unlock() }
+        for host in storedHosts {
+            guard let token = storedTokens[host.id] else { continue }
             if constantTimeEqual(token, candidate) { return host }
         }
         return nil
     }
 
-    private func persist(_ hosts: [RemoteHost]) throws {
-        try AppPaths.prepareDirectory(fileURL.deletingLastPathComponent())
-        let data = try JSONEncoder.codexNotch.encode(hosts)
-        try data.write(to: fileURL, options: [.atomic])
+    private func persistHosts(_ hosts: [RemoteHost]) throws {
+        try persist(hosts, to: fileURL)
+    }
+
+    private func persistTokens(_ tokens: [String: String]) throws {
+        try persist(tokens, to: tokensFileURL)
+    }
+
+    private func persist<T: Encodable>(_ value: T, to url: URL) throws {
+        try AppPaths.prepareDirectory(url.deletingLastPathComponent())
+        let data = try JSONEncoder.codexNotch.encode(value)
+        try data.write(to: url, options: [.atomic])
         try? FileManager.default.setAttributes(
             [.posixPermissions: 0o600],
-            ofItemAtPath: fileURL.path
+            ofItemAtPath: url.path
         )
     }
 
@@ -141,5 +153,20 @@ final class PairingStore {
         var difference: UInt8 = 0
         for index in left.indices { difference |= left[index] ^ right[index] }
         return difference == 0
+    }
+
+    private static func isValidToken(_ token: String) -> Bool {
+        token.utf8.count == 64
+            && token.utf8.allSatisfy {
+                (0x30...0x39).contains($0) || (0x61...0x66).contains($0)
+            }
+    }
+
+    private func invalidTokenError() -> NSError {
+        NSError(
+            domain: "CodexNotch",
+            code: 41,
+            userInfo: [NSLocalizedDescriptionKey: "Remote host token is invalid"]
+        )
     }
 }

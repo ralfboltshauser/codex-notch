@@ -1,7 +1,20 @@
 import AppKit
 import CodexNotchCore
 
-final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate {
+final class SettingsWindow: NSWindow {
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        var modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        modifiers.remove(.capsLock)
+        if modifiers == .command,
+           event.charactersIgnoringModifiers?.lowercased() == "w" {
+            performClose(nil)
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+}
+
+final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate, NSWindowDelegate {
     static let completionKey = "onboardingComplete.v2"
 
     private let pairings: PairingStore
@@ -17,12 +30,13 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate 
     init(pairings: PairingStore, pairer: RemoteHostPairer) {
         self.pairings = pairings
         self.pairer = pairer
-        let window = NSWindow(
+        let window = SettingsWindow(
             contentRect: NSRect(x: 0, y: 0, width: 620, height: 540),
             styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
+        window.title = "Codex Notch Settings"
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.isMovableByWindowBackground = true
@@ -30,6 +44,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate 
         window.appearance = NSAppearance(named: .darkAqua)
         window.center()
         super.init(window: window)
+        window.delegate = self
 
         root.material = .hudWindow
         root.blendingMode = .behindWindow
@@ -42,9 +57,16 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate 
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    func windowWillClose(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
+        NSApp.deactivate()
+    }
+
     func present() {
         showAppropriateStep()
         window?.center()
+        ApplicationMenu.install()
+        NSApp.setActivationPolicy(.regular)
         showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
@@ -197,7 +219,6 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate 
         let done = ClosureButton { [weak self] in
             UserDefaults.standard.set(true, forKey: Self.completionKey)
             self?.close()
-            NSApp.deactivate()
         }
         done.title = "Done"
         styleSecondaryButton(done)

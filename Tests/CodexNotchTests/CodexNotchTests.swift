@@ -1,5 +1,6 @@
 import AppKit
 import CodexNotchCore
+import Darwin
 import Network
 import XCTest
 @testable import CodexNotchApp
@@ -129,6 +130,56 @@ final class CodexNotchTests: XCTestCase {
         XCTAssertEqual(object["protocol_version"] as? Int, 1)
     }
 
+    func testPairingTokensPersistInPrivateFileAndAuthenticateWithoutKeychain() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let hostsFile = directory.appendingPathComponent("remote-hosts.json")
+        let tokensFile = directory.appendingPathComponent("remote-host-tokens.json")
+        let host = RemoteHost(
+            id: "remote-host-id",
+            label: "Ubuntu",
+            sshAlias: "ubuntu",
+            endpointHost: "127.0.0.1",
+            createdAt: Date(timeIntervalSince1970: 1_784_035_200)
+        )
+        let token = String(repeating: "a", count: 64)
+        let store = PairingStore(fileURL: hostsFile, tokensFileURL: tokensFile)
+
+        try store.save(host, token: token)
+        XCTAssertEqual(store.host(authenticating: token), host)
+        XCTAssertNil(store.host(authenticating: String(repeating: "b", count: 64)))
+
+        let reloaded = PairingStore(fileURL: hostsFile, tokensFileURL: tokensFile)
+        XCTAssertEqual(reloaded.host(authenticating: token), host)
+        let attributes = try FileManager.default.attributesOfItem(atPath: tokensFile.path)
+        let permissions = try XCTUnwrap(attributes[.posixPermissions] as? NSNumber)
+        XCTAssertEqual(permissions.intValue & 0o777, 0o600)
+    }
+
+    func testLegacyPairingRecoversMissingTokenIntoPrivateFile() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let hostsFile = directory.appendingPathComponent("remote-hosts.json")
+        let tokensFile = directory.appendingPathComponent("remote-host-tokens.json")
+        let host = RemoteHost(
+            id: "legacy-host-id",
+            label: "Ubuntu",
+            sshAlias: "ubuntu",
+            endpointHost: "127.0.0.1",
+            createdAt: Date(timeIntervalSince1970: 1_784_035_200)
+        )
+        try JSONEncoder.codexNotch.encode([host]).write(to: hostsFile)
+        let store = PairingStore(fileURL: hostsFile, tokensFileURL: tokensFile)
+        XCTAssertEqual(store.hostsMissingTokens, [host])
+
+        let token = String(repeating: "c", count: 64)
+        try store.saveRecoveredToken(token, forHostID: host.id)
+
+        XCTAssertTrue(store.hostsMissingTokens.isEmpty)
+        XCTAssertEqual(store.host(authenticating: token), host)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: tokensFile.path))
+    }
+
     func testOverlayGeometryAndPresentationModes() {
         _ = NSApplication.shared
         let overlay = OverlayController(shouldReduceMotion: { false })
@@ -218,6 +269,89 @@ final class CodexNotchTests: XCTestCase {
         overlay.hide(immediately: true)
     }
 
+    func testSettingsButtonClosesHUDBeforeOpeningSettings() {
+        _ = NSApplication.shared
+        let overlay = OverlayController()
+        let task = CompletedTask(
+            eventID: String(repeating: "d", count: 64),
+            title: "Open settings",
+            url: URL(string: "codex://threads/\(threadID)")!,
+            receivedAt: Date()
+        )
+        var wasHiddenWhenSettingsOpened = false
+        overlay.onSettings = {
+            wasHiddenWhenSettingsOpened = !overlay.isVisibleForTesting
+        }
+
+        overlay.update(tasks: [task])
+        overlay.toggle()
+        XCTAssertTrue(overlay.isVisibleForTesting)
+
+        overlay.settingsButtonForTesting?.performClick(nil)
+
+        XCTAssertTrue(wasHiddenWhenSettingsOpened)
+        XCTAssertFalse(overlay.isVisibleForTesting)
+        XCTAssertFalse(overlay.isPinnedForTesting)
+    }
+
+    func testSettingsWindowIsKeyCapableAndClosesWithCommandW() throws {
+        _ = NSApplication.shared
+        let window = SettingsWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 240),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.makeKeyAndOrderFront(nil)
+        XCTAssertTrue(window.canBecomeKey)
+        XCTAssertTrue(window.isVisible)
+
+        let commandW = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: .command,
+            timestamp: 0,
+            windowNumber: window.windowNumber,
+            context: nil,
+            characters: "w",
+            charactersIgnoringModifiers: "w",
+            isARepeat: false,
+            keyCode: 13
+        ))
+        XCTAssertTrue(window.performKeyEquivalent(with: commandW))
+        XCTAssertFalse(window.isVisible)
+    }
+
+    func testSettingsUsesRegularActivationOnlyWhileVisible() {
+        _ = NSApplication.shared
+        let previousMainMenu = NSApp.mainMenu
+        let previousWindowsMenu = NSApp.windowsMenu
+        NSApp.setActivationPolicy(.accessory)
+        let directory = temporaryDirectory()
+        defer {
+            NSApp.mainMenu = previousMainMenu
+            NSApp.windowsMenu = previousWindowsMenu
+            NSApp.setActivationPolicy(.accessory)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let pairings = PairingStore(fileURL: directory.appendingPathComponent("pairings.json"))
+        let pairer = RemoteHostPairer(store: pairings) { _ in }
+        let controller = OnboardingWindowController(pairings: pairings, pairer: pairer)
+
+        controller.present()
+        XCTAssertEqual(NSApp.activationPolicy(), .regular)
+        XCTAssertTrue(controller.window?.isVisible == true)
+        XCTAssertTrue(controller.window?.canBecomeKey == true)
+        XCTAssertEqual(NSApp.mainMenu?.items.first?.title, ApplicationMenu.applicationName)
+        XCTAssertEqual(NSApp.mainMenu?.items.map(\.title), ["Codex Notch", "File", "Edit", "Window"])
+        XCTAssertTrue(NSApp.windowsMenu === NSApp.mainMenu?.items.last?.submenu)
+
+        controller.close()
+        XCTAssertEqual(NSApp.activationPolicy(), .accessory)
+        XCTAssertTrue(controller.window?.isVisible == false)
+    }
+
     func testTailscaleListenerReportsReadyBeforePairingContinues() throws {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -226,6 +360,48 @@ final class CodexNotchTests: XCTestCase {
         defer { listener.stop() }
 
         try listener.start(host: "127.0.0.1", port: .any)
+        try listener.waitUntilReady(timeout: 2)
+    }
+
+    func testTailscaleListenerBindsAConcretePortAndAnswersAFrame() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pairings = PairingStore(fileURL: directory.appendingPathComponent("pairings.json"))
+        let host = RemoteHost(
+            id: "listener-host-id",
+            label: "Ubuntu",
+            sshAlias: "ubuntu",
+            endpointHost: "127.0.0.1",
+            createdAt: Date(timeIntervalSince1970: 1_784_035_200)
+        )
+        let token = String(repeating: "d", count: 64)
+        try pairings.save(host, token: token)
+        let listener = TailscaleListener(pairings: pairings) { _ in .accepted }
+        defer { listener.stop() }
+
+        let port = try unusedLoopbackPort()
+        try listener.start(host: "127.0.0.1", port: port)
+        try listener.waitUntilReady(timeout: 2)
+
+        let payload = try JSONSerialization.data(withJSONObject: [
+            "protocol_version": 1,
+            "kind": "ping",
+            "token": "not-paired",
+        ])
+        let acknowledgement = try socketRoundTrip(payload, port: port.rawValue)
+        XCTAssertEqual(acknowledgement.status, "rejected")
+        XCTAssertEqual(acknowledgement.error, "authentication failed")
+
+        let pairedPayload = try JSONSerialization.data(withJSONObject: [
+            "protocol_version": 1,
+            "kind": "ping",
+            "token": token,
+        ])
+        let pairedAcknowledgement = try socketRoundTrip(pairedPayload, port: port.rawValue)
+        XCTAssertEqual(pairedAcknowledgement.status, "pong")
+
+        listener.stop()
+        try listener.start(host: "127.0.0.1", port: port)
         try listener.waitUntilReady(timeout: 2)
     }
 
@@ -249,5 +425,100 @@ final class CodexNotchTests: XCTestCase {
 
     private func hooksRoot(at url: URL) throws -> [String: Any] {
         try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+    }
+
+    private func unusedLoopbackPort() throws -> NWEndpoint.Port {
+        let descriptor = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+        guard descriptor >= 0 else { throw POSIXError(.EIO) }
+        defer { Darwin.close(descriptor) }
+
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = 0
+        XCTAssertEqual(inet_pton(AF_INET, "127.0.0.1", &address.sin_addr), 1)
+        let bindStatus = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.bind(descriptor, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        guard bindStatus == 0 else { throw POSIXError(.EADDRINUSE) }
+
+        var boundAddress = sockaddr_in()
+        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+        let nameStatus = withUnsafeMutablePointer(to: &boundAddress) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                getsockname(descriptor, $0, &length)
+            }
+        }
+        guard nameStatus == 0,
+              let port = NWEndpoint.Port(rawValue: UInt16(bigEndian: boundAddress.sin_port))
+        else { throw POSIXError(.EIO) }
+        return port
+    }
+
+    private func socketRoundTrip(_ payload: Data, port: UInt16) throws -> RemoteAcknowledgement {
+        let descriptor = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+        guard descriptor >= 0 else { throw POSIXError(.EIO) }
+        defer { Darwin.close(descriptor) }
+
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = port.bigEndian
+        XCTAssertEqual(inet_pton(AF_INET, "127.0.0.1", &address.sin_addr), 1)
+        let status = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.connect(descriptor, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        guard status == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+
+        var length = UInt32(payload.count).bigEndian
+        var frame = withUnsafeBytes(of: &length) { Data($0) }
+        frame.append(payload)
+        try sendAll(frame, descriptor: descriptor)
+        let header = try receiveExact(4, descriptor: descriptor)
+        let responseLength = header.reduce(UInt32(0)) { ($0 << 8) | UInt32($1) }
+        let response = try receiveExact(Int(responseLength), descriptor: descriptor)
+        return try JSONDecoder.codexNotch.decode(RemoteAcknowledgement.self, from: response)
+    }
+
+    private func sendAll(_ data: Data, descriptor: Int32) throws {
+        try data.withUnsafeBytes { buffer in
+            guard let baseAddress = buffer.baseAddress else { return }
+            var offset = 0
+            while offset < data.count {
+                let amount = Darwin.send(
+                    descriptor,
+                    baseAddress.advanced(by: offset),
+                    data.count - offset,
+                    0
+                )
+                guard amount > 0 else { throw POSIXError(.EIO) }
+                offset += amount
+            }
+        }
+    }
+
+    private func receiveExact(_ count: Int, descriptor: Int32) throws -> Data {
+        var data = Data(count: count)
+        let received = data.withUnsafeMutableBytes { buffer -> Int in
+            guard let baseAddress = buffer.baseAddress else { return -1 }
+            var offset = 0
+            while offset < count {
+                let amount = Darwin.recv(
+                    descriptor,
+                    baseAddress.advanced(by: offset),
+                    count - offset,
+                    0
+                )
+                if amount <= 0 { return -1 }
+                offset += amount
+            }
+            return offset
+        }
+        guard received == count else { throw POSIXError(.EIO) }
+        return data
     }
 }

@@ -23,15 +23,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 userInfo: [NSLocalizedDescriptionKey: "Codex Notch closed before pairing could start"]
             )
         }
-        let receiver: TailscaleListener
-        if Thread.isMainThread {
-            receiver = try self.startRemoteListener(at: endpoint, force: true)
-        } else {
-            receiver = try DispatchQueue.main.sync {
-                try self.startRemoteListener(at: endpoint, force: true)
+        let startReceiver: (Bool) throws -> TailscaleListener = { force in
+            if Thread.isMainThread {
+                return try self.startRemoteListener(at: endpoint, force: force)
+            }
+            return try DispatchQueue.main.sync {
+                try self.startRemoteListener(at: endpoint, force: force)
             }
         }
-        try receiver.waitUntilReady()
+        let receiver = try startReceiver(false)
+        do {
+            try receiver.waitUntilReady()
+        } catch {
+            let replacement = try startReceiver(true)
+            try replacement.waitUntilReady()
+        }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -70,6 +76,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         try? inbox?.start()
         _ = try? startRemoteListener()
+        pairer.recoverMissingTokens()
         scheduleRemoteCatchUp()
 
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
@@ -152,6 +159,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showOnboarding() {
+        if let onboarding {
+            onboarding.present()
+            return
+        }
         onboarding = OnboardingWindowController(pairings: pairings, pairer: pairer)
         onboarding?.onConnectionsChanged = { [weak self] in
             _ = try? self?.startRemoteListener()
@@ -167,11 +178,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return false
             }
         } else {
-            guard let host = pairings.host(id: task.sourceID) else {
+            guard pairings.host(id: task.sourceID) != nil else {
                 NSSound.beep()
                 return false
             }
-            do { try pairer.openSession(task.threadID, on: host) }
+            do { try pairer.openSession(task.threadID) }
             catch {
                 NSSound.beep()
                 return false

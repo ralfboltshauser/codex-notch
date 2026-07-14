@@ -18,6 +18,10 @@ public enum AppPaths {
         applicationSupport.appendingPathComponent("remote-hosts.json")
     }
 
+    public static var pairingTokensFile: URL {
+        applicationSupport.appendingPathComponent("remote-host-tokens.json")
+    }
+
     public static var codexHome: URL {
         ProcessInfo.processInfo.environment["CODEX_HOME"]
             .map(URL.init(fileURLWithPath:))

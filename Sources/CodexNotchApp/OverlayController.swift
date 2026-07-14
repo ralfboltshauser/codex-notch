@@ -570,6 +570,7 @@ final class OverlayController {
     private var pendingRebuild = false
     private var updateVersion: String?
     private weak var updateButton: ClosureButton?
+    private weak var settingsButton: ClosureButton?
     private weak var rootView: HUDContentView?
     private var rowsByEventID: [String: TaskRowView] = [:]
 
@@ -593,6 +594,7 @@ final class OverlayController {
     var contentViewForTesting: NSView? { panel.contentView }
     var isUpdateAvailableForTesting: Bool { updateVersion != nil }
     var updateButtonForTesting: NSButton? { updateButton }
+    var settingsButtonForTesting: NSButton? { settingsButton }
     var hasContent: Bool { !tasks.isEmpty || updateVersion != nil }
 
     init(
@@ -835,12 +837,17 @@ final class OverlayController {
         clear.toolTip = "Dismiss all tasks"
         clear.alphaValue = 0
         clear.translatesAutoresizingMaskIntoConstraints = false
-        let settings = ClosureButton { [weak self] in self?.onSettings?() }
+        let settings = ClosureButton { [weak self] in
+            guard let self else { return }
+            self.hide(immediately: true)
+            self.onSettings?()
+        }
         settings.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings")
         settings.contentTintColor = NSColor.white.withAlphaComponent(0.66)
         settings.toolTip = "Connection settings"
         settings.alphaValue = 0
         settings.translatesAutoresizingMaskIntoConstraints = false
+        settingsButton = settings
 
         let update = ClosureButton { [weak self] in self?.onUpdate?() }
         update.image = NSImage(
