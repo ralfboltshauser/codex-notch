@@ -37,6 +37,7 @@ The Release workflow accepts only `vMAJOR.MINOR.PATCH` tag pushes. It requires:
 
 - the tag SHA to be an ancestor of `origin/main`;
 - the tag version to equal `CFBundleShortVersionString`;
+- the newest bundled changelog entry to equal that version;
 - `MACOS_CERTIFICATE_P12` and `MACOS_CERTIFICATE_PASSWORD`;
 - `APPLE_ID`, `APPLE_TEAM_ID`, and `APPLE_APP_PASSWORD`;
 - `SPARKLE_PRIVATE_KEY` matching `SUPublicEDKey` in the plist.
@@ -44,14 +45,16 @@ The Release workflow accepts only `vMAJOR.MINOR.PATCH` tag pushes. It requires:
 The workflow performs these steps in order:
 
 1. Validate tag, main ancestry, version, and secret presence.
-2. Import the Developer ID Application certificate into an ephemeral keychain.
-3. Build and sign the app, helper, and Sparkle components.
-4. Verify the Apple team identity and arm64 architecture.
-5. Submit to Apple notarization, staple the ticket, validate it, and run
+2. Validate the bundled changelog and matching release entry.
+3. Import the Developer ID Application certificate into an ephemeral keychain.
+4. Build and sign the app, helper, and Sparkle components.
+5. Verify the Apple team identity and arm64 architecture.
+6. Submit to Apple notarization, staple the ticket, validate it, and run
    Gatekeeper assessment.
-6. Generate and verify the Ed25519-signed Sparkle appcast and archive signature.
-7. Write the archive SHA-256 checksum.
-8. Publish the GitHub Release and its three assets.
+7. Generate and verify the Ed25519-signed Sparkle appcast and archive signature.
+8. Write the archive SHA-256 checksum.
+9. Render the matching bundled changelog entry and publish it with the GitHub
+   Release and its three assets.
 
 The stable Sparkle feed is:
 

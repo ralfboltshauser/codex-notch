@@ -1,0 +1,109 @@
+{
+  "releases": [
+    {
+      "version": "0.4.11",
+      "date": "2026-07-15",
+      "title": "A changelog you can trust",
+      "changes": [
+        "Added a Changelog tab to Settings with a scrollable history of shipped improvements.",
+        "Bundled release notes now power both the app and each GitHub Release.",
+        "Added CI and release validation so a version cannot ship without matching changelog notes."
+      ]
+    },
+    {
+      "version": "0.4.10",
+      "date": "2026-07-15",
+      "title": "Open from the notch",
+      "changes": [
+        "Hover over the physical notch or top-center screen area to open Codex Notch with a smooth expansion.",
+        "Added intentional-hover detection that avoids repeated or accidental openings."
+      ]
+    },
+    {
+      "version": "0.4.9",
+      "date": "2026-07-15",
+      "title": "At home in the menu bar",
+      "changes": [
+        "Moved the notch header into the menu-bar band.",
+        "Header controls now flank the measured hardware notch instead of sitting below it."
+      ]
+    },
+    {
+      "version": "0.4.8",
+      "date": "2026-07-15",
+      "title": "Shortcuts stay put",
+      "changes": [
+        "Holding Control and Shift now freezes task ordering so an incoming update cannot change the shortcut under your fingers.",
+        "Added a visible LOCKED state while shortcut ordering is frozen."
+      ]
+    },
+    {
+      "version": "0.4.7",
+      "date": "2026-07-15",
+      "title": "Know your weekly pace",
+      "changes": [
+        "Added weekly Codex usage remaining directly to the notch.",
+        "Added local usage history and a trend-based forecast for when the weekly limit may run out.",
+        "Connections is now the default Settings tab."
+      ]
+    },
+    {
+      "version": "0.4.6",
+      "date": "2026-07-15",
+      "title": "Task settings, restored",
+      "changes": [
+        "Rebuilt the Tasks tab layout so controls, descriptions, and shortcuts remain readable without overlap."
+      ]
+    },
+    {
+      "version": "0.4.5",
+      "date": "2026-07-15",
+      "title": "Themes with a point of view",
+      "changes": [
+        "Added authored themes with distinct type and surface treatments, including an all-black theme."
+      ]
+    },
+    {
+      "version": "0.4.4",
+      "date": "2026-07-15",
+      "title": "Active tasks at your fingertips",
+      "changes": [
+        "Active tasks now participate in the same keyboard shortcut flow as completed tasks."
+      ]
+    },
+    {
+      "version": "0.4.3",
+      "date": "2026-07-15",
+      "title": "Sounds that ship",
+      "changes": [
+        "Fixed packaged completion sounds and sound preview crashes.",
+        "Theme previews now use the real Codex Notch instead of an embedded imitation."
+      ]
+    },
+    {
+      "version": "0.4.2",
+      "date": "2026-07-15",
+      "title": "Settings that hold their shape",
+      "changes": [
+        "Kept the Settings window at a stable size while switching between tabs."
+      ]
+    },
+    {
+      "version": "0.4.1",
+      "date": "2026-07-15",
+      "title": "Choices you can actually see",
+      "changes": [
+        "Fixed collapsed theme and sound grids and added layout regression coverage."
+      ]
+    },
+    {
+      "version": "0.4.0",
+      "date": "2026-07-14",
+      "title": "The customizable Codex Notch",
+      "changes": [
+        "Added active tasks, themes, completion sounds, remote-host health, and shortcut hints.",
+        "Added Codex Notch Do Not Disturb for suppressing automatic openings without using macOS Focus."
+      ]
+    }
+  ]
+}

@@ -1570,9 +1570,18 @@ final class CodexNotchTests: XCTestCase {
 
         XCTAssertEqual(
             controller.settingsTabTitlesForTesting,
-            ["Themes", "Tasks", "Sounds", "Connections"]
+            ["Themes", "Tasks", "Sounds", "Connections", "Changelog"]
         )
         XCTAssertEqual(controller.selectedSettingsTabTitleForTesting, "Connections")
+        XCTAssertFalse(controller.settingsTabsHaveAmbiguityForTesting)
+        let tabFrames = controller.settingsTabFramesForTesting
+        XCTAssertEqual(tabFrames.count, 5)
+        XCTAssertTrue(tabFrames.allSatisfy {
+            $0.width > 60 && controller.settingsBoundsForTesting.contains($0)
+        })
+        for index in tabFrames.indices.dropFirst() {
+            XCTAssertFalse(tabFrames[index - 1].intersects(tabFrames[index]))
+        }
         controller.showThemesForTesting()
         XCTAssertEqual(controller.renderedThemeChoiceCountForTesting, NotchTheme.all.count)
         XCTAssertFalse(controller.hasEmbeddedThemePreviewForTesting)
@@ -1585,6 +1594,39 @@ final class CodexNotchTests: XCTestCase {
         XCTAssertTrue(NotificationSound.allCases.filter { $0 != .none }.allSatisfy {
             $0.resourceURL != nil
         })
+    }
+
+    func testBundledChangelogMatchesReleaseAndRendersInSettings() throws {
+        _ = NSApplication.shared
+        XCTAssertEqual(ChangelogCatalog.releases.first?.version, "0.4.11")
+        XCTAssertGreaterThanOrEqual(ChangelogCatalog.releases.count, 12)
+        XCTAssertTrue(ChangelogCatalog.releases.allSatisfy {
+            !$0.title.isEmpty && !$0.changes.isEmpty
+        })
+
+        let decoded = try ChangelogCatalog.decode(Data("""
+        {"releases":[{"version":"1.2.3","date":"2026-07-15","title":"Clear notes","changes":["One useful change."]}]}
+        """.utf8))
+        XCTAssertEqual(decoded.first?.version, "1.2.3")
+
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pairings = PairingStore(fileURL: directory.appendingPathComponent("pairings.json"))
+        let pairer = RemoteHostPairer(store: pairings) { _ in }
+        let controller = OnboardingWindowController(
+            pairings: pairings,
+            pairer: pairer,
+            isHookInstalled: { true }
+        )
+
+        controller.showChangelogForTesting()
+
+        XCTAssertEqual(controller.selectedSettingsTabTitleForTesting, "Changelog")
+        XCTAssertEqual(
+            controller.renderedChangelogVersionsForTesting,
+            ChangelogCatalog.releases.map(\.version)
+        )
+        XCTAssertTrue(controller.changelogUsesVerticalScrollingForTesting)
     }
 
     func testSettingsThemeAndSoundChoicesReceiveVisibleFrames() throws {
@@ -1704,7 +1746,7 @@ final class CodexNotchTests: XCTestCase {
         XCTAssertEqual(controller.settingsBoundsForTesting.width, expectedSize.width, accuracy: 0.5)
         XCTAssertEqual(controller.settingsBoundsForTesting.height, expectedSize.height, accuracy: 0.5)
 
-        for title in ["Tasks", "Sounds", "Connections", "Themes"] {
+        for title in ["Tasks", "Sounds", "Connections", "Changelog", "Themes"] {
             controller.selectSettingsTabForTesting(titled: title)
             let transitionFinished = expectation(description: "\(title) tab transition finished")
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {

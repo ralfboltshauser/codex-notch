@@ -154,6 +154,118 @@ final class FlippedHostStackView: NSStackView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 }
 
+final class ChangelogReleaseCardView: NSView {
+    let release: ChangelogRelease
+
+    static func height(for release: ChangelogRelease) -> CGFloat {
+        68 + CGFloat(release.changes.count * 40)
+    }
+
+    init(release: ChangelogRelease, currentVersion: String?) {
+        self.release = release
+        super.init(frame: .zero)
+        let theme = ThemeStore.shared.activeTheme
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        layer?.backgroundColor = theme.quietSurface.cgColor
+        layer?.cornerRadius = 12
+        layer?.cornerCurve = .continuous
+
+        let version = label("v\(release.version)", size: 11, weight: .bold, color: theme.accent)
+        version.font = .monospacedSystemFont(ofSize: 11, weight: .bold)
+        let date = label(Self.displayDate(release.date), size: 10.5, weight: .medium, color: theme.tertiaryText)
+        date.alignment = .right
+        var headerViews: [NSView] = [version]
+        if release.version == currentVersion {
+            let current = label("CURRENT", size: 9, weight: .bold, color: theme.accent)
+            current.alignment = .center
+            current.wantsLayer = true
+            current.layer?.backgroundColor = theme.accent.withAlphaComponent(0.12).cgColor
+            current.layer?.cornerRadius = 7
+            current.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                current.widthAnchor.constraint(equalToConstant: 58),
+                current.heightAnchor.constraint(equalToConstant: 18),
+            ])
+            headerViews.append(current)
+        }
+        headerViews.append(contentsOf: [NSView(), date])
+        let header = NSStackView(views: headerViews)
+        header.orientation = .horizontal
+        header.alignment = .centerY
+        header.spacing = 8
+
+        let title = label(release.title, size: 14, weight: .semibold, color: theme.primaryText)
+        title.lineBreakMode = .byTruncatingTail
+
+        let bullets = release.changes.map { change -> NSView in
+            let dot = NSView()
+            dot.translatesAutoresizingMaskIntoConstraints = false
+            dot.wantsLayer = true
+            dot.layer?.backgroundColor = theme.accent.withAlphaComponent(0.78).cgColor
+            dot.layer?.cornerRadius = 2.5
+            let text = label(change, size: 11.5, weight: .regular, color: theme.secondaryText)
+            text.maximumNumberOfLines = 2
+            text.lineBreakMode = .byWordWrapping
+            text.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            let row = NSStackView(views: [dot, text])
+            row.orientation = .horizontal
+            row.alignment = .centerY
+            row.spacing = 10
+            NSLayoutConstraint.activate([
+                row.heightAnchor.constraint(equalToConstant: 32),
+                dot.widthAnchor.constraint(equalToConstant: 5),
+                dot.heightAnchor.constraint(equalToConstant: 5),
+            ])
+            return row
+        }
+
+        let stack = NSStackView(views: [header, title] + bullets)
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 8
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: Self.height(for: release)),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: 12),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -12),
+            header.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            title.widthAnchor.constraint(equalTo: stack.widthAnchor),
+        ] + bullets.map { $0.widthAnchor.constraint(equalTo: stack.widthAnchor) })
+        setAccessibilityLabel(
+            "Codex Notch \(release.version), \(release.title). \(release.changes.joined(separator: ". "))"
+        )
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    private func label(
+        _ text: String,
+        size: CGFloat,
+        weight: NSFont.Weight,
+        color: NSColor
+    ) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.font = ThemeStore.shared.activeTheme.font(ofSize: size, weight: weight)
+        label.textColor = color
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }
+
+    private static func displayDate(_ value: String) -> String {
+        let parts = value.split(separator: "-")
+        guard parts.count == 3,
+              let month = Int(parts[1]),
+              (1...12).contains(month)
+        else { return value }
+        let months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
+        return "\(months[month - 1]) \(parts[2]), \(parts[0])"
+    }
+}
+
 final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate, NSWindowDelegate {
     static let completionKey = "onboardingComplete.v2"
     static let settingsContentSize = NSSize(width: 720, height: 650)
@@ -163,6 +275,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         case tasks
         case sounds
         case connections
+        case changelog
     }
 
     static func versionDescription(
@@ -204,6 +317,8 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
     private var soundCards: [NotificationSoundCardButton] = []
     private var settingsTabs: [SettingsNavigationButton] = []
     private var taskLayoutViews: [String: NSView] = [:]
+    private var changelogCards: [ChangelogReleaseCardView] = []
+    private weak var changelogScrollView: NSScrollView?
 
     var onConnectionsChanged: (() -> Void)?
     var onRefreshConnections: (() -> Void)?
@@ -220,6 +335,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         case .tasks: return "Tasks"
         case .sounds: return "Sounds"
         case .connections: return "Connections"
+        case .changelog: return "Changelog"
         }
     }
     var renderedThemeChoiceCountForTesting: Int { themeCards.count }
@@ -235,6 +351,20 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
     var settingsBoundsForTesting: NSRect {
         root.layoutSubtreeIfNeeded()
         return root.bounds
+    }
+    var settingsTabFramesForTesting: [NSRect] {
+        root.layoutSubtreeIfNeeded()
+        return settingsTabs.map { $0.convert($0.bounds, to: root) }
+    }
+    var settingsTabsHaveAmbiguityForTesting: Bool {
+        root.layoutSubtreeIfNeeded()
+        return settingsTabs.contains(where: \.hasAmbiguousLayout)
+    }
+    var renderedChangelogVersionsForTesting: [String] {
+        changelogCards.map(\.release.version)
+    }
+    var changelogUsesVerticalScrollingForTesting: Bool {
+        changelogScrollView?.hasVerticalScroller == true
     }
     var taskLayoutFramesForTesting: [String: NSRect] {
         root.layoutSubtreeIfNeeded()
@@ -261,6 +391,10 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
 
     func showTasksForTesting() {
         buildSettingsPage(.tasks)
+    }
+
+    func showChangelogForTesting() {
+        buildSettingsPage(.changelog)
     }
 
     func selectSettingsTabForTesting(titled title: String) {
@@ -383,6 +517,8 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
 
     private func resetContent() {
         taskLayoutViews.removeAll()
+        changelogCards.removeAll()
+        changelogScrollView = nil
         content.subviews.forEach { $0.removeFromSuperview() }
         content.layer?.removeAllAnimations()
         content.layer?.opacity = 1
@@ -398,6 +534,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         case .tasks: buildTasks()
         case .sounds: buildSounds()
         case .connections: buildConnections()
+        case .changelog: buildChangelog()
         }
     }
 
@@ -816,6 +953,78 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         ])
     }
 
+    private func buildChangelog() {
+        resetContent()
+        let theme = ThemeStore.shared.activeTheme
+        let header = settingsHeader(selected: .changelog)
+        let title = makeLabel("What’s new", size: 25, weight: .semibold, color: theme.primaryText)
+        let subtitle = makeLabel(
+            "A clear record of what changed in every recent Codex Notch release.",
+            size: 13,
+            weight: .regular,
+            color: theme.secondaryText
+        )
+        let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+        let cards = ChangelogCatalog.releases.map {
+            ChangelogReleaseCardView(release: $0, currentVersion: currentVersion)
+        }
+        changelogCards = cards
+        let list = FlippedHostStackView(arrangedViews: cards)
+        list.orientation = .vertical
+        list.alignment = .leading
+        list.spacing = 10
+        let contentHeight = cards.reduce(CGFloat(0)) {
+            $0 + ChangelogReleaseCardView.height(for: $1.release)
+        } + CGFloat(max(0, cards.count - 1) * 10)
+        list.frame = NSRect(x: 0, y: 0, width: 636, height: contentHeight)
+        list.autoresizingMask = [.width]
+        cards.forEach {
+            $0.widthAnchor.constraint(equalTo: list.widthAnchor).isActive = true
+        }
+
+        let scroll = NSScrollView()
+        scroll.drawsBackground = false
+        scroll.hasHorizontalScroller = false
+        scroll.hasVerticalScroller = contentHeight > 354
+        scroll.autohidesScrollers = true
+        scroll.scrollerStyle = .overlay
+        scroll.verticalScrollElasticity = .automatic
+        scroll.documentView = list
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        changelogScrollView = scroll
+
+        let done = ClosureButton { [weak self] in self?.close() }
+        done.title = "Done"
+        styleSecondaryButton(done)
+        let checkForUpdates = makeCheckForUpdatesButton()
+        let footer = NSStackView(views: [makeVersionLabel(), checkForUpdates, NSView(), done])
+        footer.orientation = .horizontal
+        footer.alignment = .centerY
+        footer.spacing = 12
+
+        let stack = NSStackView(views: [header, title, subtitle, scroll, footer])
+        configureStack(stack)
+        stack.spacing = 0
+        stack.setCustomSpacing(28, after: header)
+        stack.setCustomSpacing(7, after: title)
+        stack.setCustomSpacing(22, after: subtitle)
+        stack.setCustomSpacing(20, after: scroll)
+        content.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: content.topAnchor),
+            header.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            scroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            scroll.heightAnchor.constraint(equalToConstant: 354),
+            footer.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            checkForUpdates.widthAnchor.constraint(equalToConstant: 148),
+            checkForUpdates.heightAnchor.constraint(equalToConstant: 40),
+            done.widthAnchor.constraint(equalToConstant: 96),
+            done.heightAnchor.constraint(equalToConstant: 40),
+        ])
+    }
+
     private func soundCardRow(_ cards: [NotificationSoundCardButton]) -> NSStackView {
         let row = NSStackView(views: cards)
         row.orientation = .horizontal
@@ -869,11 +1078,16 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
             symbol: "point.3.connected.trianglepath.dotted",
             active: selected == .connections
         ) { [weak self] in self?.transitionContent { self?.buildSettingsPage(.connections) } }
-        let navigation = NSStackView(views: [appearance, tasks, sounds, connections])
+        let changelog = settingsNavigationButton(
+            title: "Changelog",
+            symbol: "clock.arrow.circlepath",
+            active: selected == .changelog
+        ) { [weak self] in self?.transitionContent { self?.buildSettingsPage(.changelog) } }
+        let navigation = NSStackView(views: [appearance, tasks, sounds, connections, changelog])
         navigation.orientation = .horizontal
-        navigation.spacing = 6
+        navigation.spacing = 5
         navigation.alignment = .centerY
-        settingsTabs = [appearance, tasks, sounds, connections]
+        settingsTabs = [appearance, tasks, sounds, connections, changelog]
 
         let header = NSStackView(views: [mark, product, spacer, navigation])
         header.orientation = .horizontal
@@ -887,6 +1101,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
             tasks.heightAnchor.constraint(equalToConstant: 30),
             sounds.heightAnchor.constraint(equalToConstant: 30),
             connections.heightAnchor.constraint(equalToConstant: 30),
+            changelog.heightAnchor.constraint(equalToConstant: 30),
         ])
         return header
     }
