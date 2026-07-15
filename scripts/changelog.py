@@ -6,9 +6,9 @@ import plistlib
 import re
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
-DEFAULT_CHANGELOG = ROOT / "Sources/CodexNotchApp/Resources/Changelog.json"
-DEFAULT_PLIST = ROOT / "AppResources/Info.plist"
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_CHANGELOG = ROOT / "apps/macos/Sources/CodexNotchApp/Resources/Changelog.json"
+DEFAULT_PLIST = ROOT / "apps/macos/AppResources/Info.plist"
 VERSION_PATTERN = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
 

@@ -46,12 +46,12 @@ jobs:
             echo "Release tags must point to a commit on main" >&2
             exit 1
           }
-          PLIST_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' AppResources/Info.plist)
+          PLIST_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' apps/macos/AppResources/Info.plist)
           test "$VERSION" = "$PLIST_VERSION" || {
             echo "Tag $GITHUB_REF_NAME does not match Info.plist version $PLIST_VERSION" >&2
             exit 1
           }
-          python3 changelog.py validate
+          python3 scripts/changelog.py validate
 
       - name: Import Developer ID certificate
         env:
@@ -80,7 +80,7 @@ jobs:
           echo "CODE_SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
 
       - name: Build signed app
-        run: ./build-macos-app.sh
+        run: ./scripts/build-macos-app.sh
 
       - name: Verify signing identity and architecture
         env:
@@ -189,7 +189,7 @@ jobs:
         run: |
           set -eu
           VERSION=${GITHUB_REF_NAME#v}
-          python3 changelog.py markdown "$VERSION" > .build/release-notes.md
+          python3 scripts/changelog.py markdown "$VERSION" > .build/release-notes.md
           gh release create "$GITHUB_REF_NAME" \
             ".build/release-assets/CodexNotch-$VERSION.zip" \
             ".build/release-assets/CodexNotch-$VERSION.zip.sha256" \

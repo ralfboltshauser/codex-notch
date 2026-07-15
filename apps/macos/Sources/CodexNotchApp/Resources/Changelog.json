@@ -1,6 +1,16 @@
 {
   "releases": [
     {
+      "version": "0.4.13",
+      "date": "2026-07-15",
+      "title": "A sturdier foundation",
+      "changes": [
+        "Separated the macOS app and Ubuntu companion into explicit app directories so each platform's shipped files stay together.",
+        "Unified local checks, CI, installers, and signed builds behind the same repository paths and commands.",
+        "Preserved all existing task, theme, sound, usage, changelog, and remote-host behavior during the reorganization."
+      ]
+    },
+    {
       "version": "0.4.12",
       "date": "2026-07-15",
       "title": "A changelog that opens safely",

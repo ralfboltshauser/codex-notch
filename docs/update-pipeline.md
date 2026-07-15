@@ -6,7 +6,7 @@ Codex Notch uses Sparkle 2.9.4 and GitHub Releases. A release contains:
 - `appcast.xml`, with signed feed metadata and the archive's Ed25519 signature
 
 Every release also adds a newest-first entry to
-`Sources/CodexNotchApp/Resources/Changelog.json`. That entry is bundled into the
+`apps/macos/Sources/CodexNotchApp/Resources/Changelog.json`. That entry is bundled into the
 Settings changelog and rendered verbatim as the GitHub Release notes.
 
 The stable feed URL is:
@@ -33,7 +33,8 @@ Create the app-specific password at Apple Account sign-in and ensure the
 Developer ID certificate belongs to `APPLE_TEAM_ID`.
 
 The Sparkle key is already configured as `SPARKLE_PRIVATE_KEY`. Its seed must
-remain identical to the `SUPublicEDKey` in `AppResources/Info.plist`. The local
+remain identical to the `SUPublicEDKey` in
+`apps/macos/AppResources/Info.plist`. The local
 recovery copy is:
 
 ```text
@@ -48,14 +49,15 @@ Before opening the release PR, write the new changelog entry and prepare the
 matching version:
 
 ```sh
-edit Sources/CodexNotchApp/Resources/Changelog.json
-./prepare-release.sh 0.3.1
-python3 changelog.py markdown 0.3.1
-git add AppResources/Info.plist Sources/CodexNotchApp/Resources/Changelog.json
-git commit -m 'Prepare 0.3.1 release'
+edit apps/macos/Sources/CodexNotchApp/Resources/Changelog.json
+./scripts/prepare-release.sh 0.4.13
+python3 scripts/changelog.py markdown 0.4.13
+git add apps/macos/AppResources/Info.plist \
+  apps/macos/Sources/CodexNotchApp/Resources/Changelog.json
+git commit -m 'Prepare 0.4.13 release'
 ```
 
-`python3 changelog.py validate` rejects missing, duplicate, malformed, or
+`python3 scripts/changelog.py validate` rejects missing, duplicate, malformed, or
 out-of-order entries and requires the newest changelog version to match the app
 version. CI and the tag workflow both run this validation.
 

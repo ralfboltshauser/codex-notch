@@ -12,7 +12,7 @@ import unittest
 from unittest import mock
 
 
-SCRIPT = Path(__file__).parents[2] / "remote" / "codex_notch_remote.py"
+SCRIPT = Path(__file__).parents[1] / "codex_notch_remote.py"
 SPEC = importlib.util.spec_from_file_location("codex_notch_remote", SCRIPT)
 remote = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(remote)
