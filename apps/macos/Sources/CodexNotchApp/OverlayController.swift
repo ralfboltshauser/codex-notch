@@ -922,6 +922,7 @@ final class WeeklyUsageHeaderView: ClosureButton {
         valueLabel.font = .monospacedDigitSystemFont(ofSize: 10.5, weight: .semibold)
         valueLabel.alignment = .center
         valueLabel.translatesAutoresizingMaskIntoConstraints = false
+        valueLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         addSubview(valueLabel)
 
         NSLayoutConstraint.activate([
@@ -949,15 +950,15 @@ final class WeeklyUsageHeaderView: ClosureButton {
             setAccessibilityValue(nil)
             setAccessibilityHelp(nil)
         case .loading:
-            valueLabel.stringValue = "7d …"
+            valueLabel.stringValue = "…"
             valueLabel.textColor = theme.tertiaryText
-            toolTip = "Checking your seven-day Codex account limit."
+            toolTip = "Checking your weekly Codex limit."
             isHidden = false
             setAccessibilityLabel("Checking weekly Codex account limit")
             setAccessibilityValue(nil)
             setAccessibilityHelp("Refresh weekly usage")
         case .unavailable(let message):
-            valueLabel.stringValue = "7d —%"
+            valueLabel.stringValue = "—%"
             valueLabel.textColor = .systemOrange
             toolTip = "Weekly account limit unavailable — \(message). Click to retry."
             isHidden = false
@@ -966,7 +967,7 @@ final class WeeklyUsageHeaderView: ClosureButton {
             setAccessibilityHelp("Retry reading weekly usage")
         case .available(let overview):
             let remaining = overview.limit.remainingPercent
-            valueLabel.stringValue = "7d \(remaining)%"
+            valueLabel.stringValue = "\(remaining)%"
             if remaining == 0 {
                 valueLabel.textColor = .systemRed
             } else if remaining <= 20 {
@@ -984,11 +985,15 @@ final class WeeklyUsageHeaderView: ClosureButton {
 
     var valueTextForTesting: String { valueLabel.stringValue }
     var valueColorForTesting: NSColor? { valueLabel.textColor }
+    var valueFitsWithoutTruncationForTesting: Bool {
+        layoutSubtreeIfNeeded()
+        return valueLabel.frame.width + 0.5 >= valueLabel.intrinsicContentSize.width
+    }
 
     private static func toolTip(for overview: CodexUsageOverview, now: Date) -> String {
         var lines = [
-            "Weekly Codex limit: \(overview.limit.remainingPercent)% remaining",
-            "Account-wide · not this task's context",
+            "You have \(overview.limit.remainingPercent)% of your weekly Codex limit remaining.",
+            "Account-wide, not task context.",
             forecastText(overview.forecast, now: now),
         ]
         if let resetsAt = overview.limit.resetsAt {
@@ -1226,6 +1231,9 @@ final class OverlayController {
     var hasEmptyStateForTesting: Bool { emptyStateView != nil }
     var weeklyUsageTextForTesting: String? { weeklyUsageBadge?.valueTextForTesting }
     var weeklyUsageToolTipForTesting: String? { weeklyUsageBadge?.toolTip }
+    var weeklyUsageValueFitsForTesting: Bool {
+        weeklyUsageBadge?.valueFitsWithoutTruncationForTesting == true
+    }
     var weeklyUsageButtonForTesting: NSButton? { weeklyUsageBadge }
     var weeklyUsageFrameForTesting: NSRect? { weeklyUsageBadge?.frame }
     var isShortcutOrderLockedForTesting: Bool { shortcutLettersVisible }
