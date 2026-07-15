@@ -8,13 +8,18 @@ fi
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+MACOS_PACKAGE="$REPO_ROOT/apps/macos"
+SWIFT_SCRATCH="$REPO_ROOT/.build"
 APP_DIR=${1:-"$REPO_ROOT/.build/dist/Codex Notch.app"}
 IDENTITY=${CODE_SIGN_IDENTITY:--}
 
 cd "$REPO_ROOT"
-swift build -c release --product CodexNotch
-swift build -c release --product CodexNotchHook
-BIN_DIR=$(swift build -c release --show-bin-path)
+swift build --package-path "$MACOS_PACKAGE" --scratch-path "$SWIFT_SCRATCH" \
+  -c release --product CodexNotch
+swift build --package-path "$MACOS_PACKAGE" --scratch-path "$SWIFT_SCRATCH" \
+  -c release --product CodexNotchHook
+BIN_DIR=$(swift build --package-path "$MACOS_PACKAGE" \
+  --scratch-path "$SWIFT_SCRATCH" -c release --show-bin-path)
 
 rm -rf "$APP_DIR"
 mkdir -p \
@@ -29,7 +34,8 @@ install -m 0755 "$REPO_ROOT/apps/linux/codex_notch_remote.py" \
   "$APP_DIR/Contents/Resources/remote/codex_notch_remote.py"
 install -m 0755 "$REPO_ROOT/apps/linux/codex_notch_live.py" \
   "$APP_DIR/Contents/Resources/remote/codex_notch_live.py"
-install -m 0644 "$REPO_ROOT/apps/macos/AppResources/Info.plist" "$APP_DIR/Contents/Info.plist"
+install -m 0644 "$REPO_ROOT/apps/macos/AppResources/Info.plist" \
+  "$APP_DIR/Contents/Info.plist"
 RESOURCE_BUNDLE=$(find "$BIN_DIR" -maxdepth 1 -type d \
   -name 'CodexNotch_CodexNotchApp.bundle' -print -quit)
 if [ -z "$RESOURCE_BUNDLE" ]; then

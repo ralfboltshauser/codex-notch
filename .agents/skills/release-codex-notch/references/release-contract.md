@@ -18,8 +18,9 @@ Use these sources in descending order of authority:
 
 The CI workflow runs for pushes and pull requests.
 
-- `linux` runs `make check-linux`, which exercises Python unit tests, shell
-  syntax, Python compilation, and changelog validation.
+- `linux` runs `make check-linux`, which exercises the Ubuntu app tests,
+  repository-tool tests, shell syntax, Python compilation, and changelog
+  validation.
 - `macos` runs `make test-macos` and builds the complete app bundle with
   `scripts/build-macos-app.sh` on a macOS runner.
 

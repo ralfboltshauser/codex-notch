@@ -178,8 +178,10 @@ the Mac.
 
 ## Development
 
-Platform code is kept under `apps/macos` and `apps/linux`; repository-wide
-build, install, and release entry points live under `scripts`.
+The standalone SwiftPM package is under `apps/macos`, and the Ubuntu publishers
+and their tests are under `apps/linux`. Repository-wide build, install, and
+release entry points live under `scripts`, alongside tests for repository
+tooling. The root `Makefile` orchestrates both apps.
 
 Run Ubuntu tests on Linux or macOS:
 
@@ -231,12 +233,12 @@ To publish a release after the Apple secrets are configured:
 
 ```sh
 edit apps/macos/Sources/CodexNotchApp/Resources/Changelog.json
-./scripts/prepare-release.sh 0.4.13
+./scripts/prepare-release.sh 0.4.14
 git add apps/macos/AppResources/Info.plist \
   apps/macos/Sources/CodexNotchApp/Resources/Changelog.json
-git commit -m 'Prepare 0.4.13 release'
-git tag v0.4.13
-git push origin main v0.4.13
+git commit -m 'Prepare 0.4.14 release'
+git tag v0.4.14
+git push origin main v0.4.14
 ```
 
 The tag workflow builds and signs the complete app, notarizes and staples it,

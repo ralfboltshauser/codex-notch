@@ -1,6 +1,16 @@
 {
   "releases": [
     {
+      "version": "0.4.14",
+      "date": "2026-07-15",
+      "title": "Workspaces with clear ownership",
+      "changes": [
+        "Made the macOS app a self-contained Swift package inside its app workspace.",
+        "Separated Ubuntu publisher tests from repository release-tool tests.",
+        "Kept local checks, CI, signed builds, and release artifacts on one root orchestration path."
+      ]
+    },
+    {
       "version": "0.4.13",
       "date": "2026-07-15",
       "title": "A sturdier foundation",
