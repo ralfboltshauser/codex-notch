@@ -6,8 +6,9 @@ Codex Notch uses Sparkle 2.9.4 and GitHub Releases. A release contains:
 - `appcast.xml`, with signed feed metadata and the archive's Ed25519 signature
 
 Every release also adds a newest-first entry to
-`apps/macos/Sources/CodexNotchApp/Resources/Changelog.json`. That entry is bundled into the
-Settings changelog and rendered verbatim as the GitHub Release notes.
+`apps/macos/Sources/CodexNotchApp/Resources/Changelog.json`. That entry is
+bundled into the Settings changelog and rendered verbatim as the GitHub Release
+notes.
 
 The stable feed URL is:
 
@@ -50,11 +51,11 @@ matching version:
 
 ```sh
 edit apps/macos/Sources/CodexNotchApp/Resources/Changelog.json
-./scripts/prepare-release.sh 0.4.13
-python3 scripts/changelog.py markdown 0.4.13
+./scripts/prepare-release.sh 0.4.14
+python3 scripts/changelog.py markdown 0.4.14
 git add apps/macos/AppResources/Info.plist \
   apps/macos/Sources/CodexNotchApp/Resources/Changelog.json
-git commit -m 'Prepare 0.4.13 release'
+git commit -m 'Prepare 0.4.14 release'
 ```
 
 `python3 scripts/changelog.py validate` rejects missing, duplicate, malformed, or

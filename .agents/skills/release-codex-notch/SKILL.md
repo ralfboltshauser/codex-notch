@@ -20,7 +20,7 @@ Run from the repository root. Read these files before changing anything:
 - `apps/macos/AppResources/Info.plist`
 - `apps/macos/Sources/CodexNotchApp/Resources/Changelog.json`
 - `scripts/changelog.py`
-- `Package.swift`
+- `apps/macos/Package.swift`
 - `Makefile`
 - `docs/update-pipeline.md`
 

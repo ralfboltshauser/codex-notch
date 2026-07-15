@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Check Linux tooling
+      - name: Check Linux app and repository tooling
         run: make check-linux
 
   macos:
