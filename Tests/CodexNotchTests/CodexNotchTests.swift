@@ -1355,6 +1355,62 @@ final class CodexNotchTests: XCTestCase {
         XCTAssertEqual(controller.doNotDisturbButtonForTesting?.title, "On")
     }
 
+    func testTaskSettingsControlsHaveStableNonOverlappingLayout() throws {
+        _ = NSApplication.shared
+        let previousTheme = ThemeStore.shared.selectedID
+        ThemeStore.shared.select(.blackout)
+        defer { ThemeStore.shared.select(previousTheme) }
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pairings = PairingStore(fileURL: directory.appendingPathComponent("pairings.json"))
+        let pairer = RemoteHostPairer(store: pairings) { _ in }
+        let controller = OnboardingWindowController(
+            pairings: pairings,
+            pairer: pairer,
+            isHookInstalled: { true }
+        )
+
+        controller.showTasksForTesting()
+        let frames = controller.taskLayoutFramesForTesting
+        let expected = [
+            "Show active tasks.title",
+            "Show active tasks.detail",
+            "Show active tasks.toggle",
+            "Do Not Disturb.title",
+            "Do Not Disturb.detail",
+            "Do Not Disturb.toggle",
+            "Quick Toggle.title",
+            "Quick Toggle.keys",
+        ]
+
+        XCTAssertEqual(Set(frames.keys), Set(expected))
+        XCTAssertFalse(controller.taskLayoutHasAmbiguityForTesting)
+        for name in expected {
+            let frame = try XCTUnwrap(frames[name])
+            XCTAssertGreaterThan(frame.width, 0, "\(name) has no width")
+            XCTAssertGreaterThan(frame.height, 0, "\(name) has no height")
+            XCTAssertTrue(
+                controller.settingsBoundsForTesting.contains(frame),
+                "\(name) escaped the settings window"
+            )
+        }
+
+        for title in ["Show active tasks", "Do Not Disturb"] {
+            let titleFrame = try XCTUnwrap(frames["\(title).title"])
+            let detailFrame = try XCTUnwrap(frames["\(title).detail"])
+            let toggleFrame = try XCTUnwrap(frames["\(title).toggle"])
+            XCTAssertFalse(titleFrame.intersects(detailFrame), "\(title) title overlaps its detail")
+            XCTAssertFalse(titleFrame.intersects(toggleFrame), "\(title) title overlaps its toggle")
+            XCTAssertFalse(detailFrame.intersects(toggleFrame), "\(title) detail overlaps its toggle")
+            XCTAssertEqual(titleFrame.midY, toggleFrame.midY, accuracy: 2)
+        }
+
+        let shortcutTitle = try XCTUnwrap(frames["Quick Toggle.title"])
+        let shortcutKeys = try XCTUnwrap(frames["Quick Toggle.keys"])
+        XCTAssertFalse(shortcutTitle.intersects(shortcutKeys))
+        XCTAssertGreaterThanOrEqual(shortcutKeys.minX - shortcutTitle.maxX, 15)
+    }
+
     func testThemePreviewIsTemporaryAndSelectionPersists() {
         let suiteName = "CodexNotchTests.Theme.\(UUID().uuidString)"
         guard let defaults = UserDefaults(suiteName: suiteName) else {

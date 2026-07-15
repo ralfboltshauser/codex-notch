@@ -203,6 +203,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
     private var themeCards: [ThemeCardButton] = []
     private var soundCards: [NotificationSoundCardButton] = []
     private var settingsTabs: [SettingsNavigationButton] = []
+    private var taskLayoutViews: [String: NSView] = [:]
 
     var onConnectionsChanged: (() -> Void)?
     var onRefreshConnections: (() -> Void)?
@@ -226,6 +227,14 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
     var settingsBoundsForTesting: NSRect {
         root.layoutSubtreeIfNeeded()
         return root.bounds
+    }
+    var taskLayoutFramesForTesting: [String: NSRect] {
+        root.layoutSubtreeIfNeeded()
+        return taskLayoutViews.mapValues { $0.convert($0.bounds, to: root) }
+    }
+    var taskLayoutHasAmbiguityForTesting: Bool {
+        root.layoutSubtreeIfNeeded()
+        return taskLayoutViews.values.contains(where: \.hasAmbiguousLayout)
     }
     var hasEmbeddedThemePreviewForTesting: Bool {
         func containsPreview(_ view: NSView) -> Bool {
@@ -361,6 +370,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
     }
 
     private func resetContent() {
+        taskLayoutViews.removeAll()
         content.subviews.forEach { $0.removeFromSuperview() }
         content.layer?.removeAllAnimations()
         content.layer?.opacity = 1
@@ -410,6 +420,8 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
             icon.contentTintColor = theme.accent
             icon.translatesAutoresizingMaskIntoConstraints = false
             let label = makeLabel(title, size: 14, weight: .semibold, color: theme.primaryText)
+            label.lineBreakMode = .byTruncatingTail
+            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             let detailLabel = makeLabel(
                 detail,
                 size: 11.5,
@@ -417,6 +429,8 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
                 color: theme.secondaryText
             )
             detailLabel.maximumNumberOfLines = 2
+            detailLabel.lineBreakMode = .byWordWrapping
+            detailLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             let toggle = ClosureButton(handler: action)
             toggle.title = enabled ? "On" : "Off"
             toggle.image = NSImage(
@@ -428,6 +442,8 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
             toggle.contentTintColor = enabled ? theme.accent : theme.secondaryText
             toggle.toolTip = toolTip
             toggle.translatesAutoresizingMaskIntoConstraints = false
+            toggle.setContentHuggingPriority(.required, for: .horizontal)
+            toggle.setContentCompressionResistancePriority(.required, for: .horizontal)
             [icon, label, detailLabel, toggle].forEach(row.addSubview)
             NSLayoutConstraint.activate([
                 row.heightAnchor.constraint(equalToConstant: 88),
@@ -446,6 +462,9 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
                 detailLabel.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -18),
                 detailLabel.topAnchor.constraint(equalTo: label.bottomAnchor, constant: 7),
             ])
+            taskLayoutViews["\(title).title"] = label
+            taskLayoutViews["\(title).detail"] = detailLabel
+            taskLayoutViews["\(title).toggle"] = toggle
             return (row, toggle)
         }
 
@@ -509,16 +528,24 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         shortcutCard.layer?.cornerRadius = 12
         shortcutCard.layer?.cornerCurve = .continuous
         let shortcutDetail = makeLabel("Show or hide active tasks from anywhere", size: 13, weight: .medium, color: theme.primaryText)
+        shortcutDetail.lineBreakMode = .byTruncatingTail
+        shortcutDetail.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let keys = makeLabel(GlobalHotKeys.activeTasksShortcutLabel(), size: 12, weight: .semibold, color: theme.accent)
         keys.font = .monospacedSystemFont(ofSize: 12, weight: .semibold)
+        keys.alignment = .center
+        keys.setContentHuggingPriority(.required, for: .horizontal)
+        keys.setContentCompressionResistancePriority(.required, for: .horizontal)
         [shortcutDetail, keys].forEach(shortcutCard.addSubview)
         NSLayoutConstraint.activate([
             shortcutCard.heightAnchor.constraint(equalToConstant: 58),
             shortcutDetail.leadingAnchor.constraint(equalTo: shortcutCard.leadingAnchor, constant: 16),
             shortcutDetail.centerYAnchor.constraint(equalTo: shortcutCard.centerYAnchor),
+            shortcutDetail.trailingAnchor.constraint(lessThanOrEqualTo: keys.leadingAnchor, constant: -16),
             keys.trailingAnchor.constraint(equalTo: shortcutCard.trailingAnchor, constant: -16),
             keys.centerYAnchor.constraint(equalTo: shortcutCard.centerYAnchor),
         ])
+        taskLayoutViews["Quick Toggle.title"] = shortcutDetail
+        taskLayoutViews["Quick Toggle.keys"] = keys
         let note = makeLabel(
             "Finished tasks are still collected in Do Not Disturb and remain available with \(GlobalHotKeys.toggleShortcutLabel()).",
             size: 11.5,
@@ -1390,6 +1417,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         let label = NSTextField(labelWithString: text)
         label.font = ThemeStore.shared.activeTheme.font(ofSize: size, weight: weight)
         label.textColor = color
+        label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }
 
