@@ -3,8 +3,10 @@ import importlib.util
 import unittest
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
-SPEC = importlib.util.spec_from_file_location("codex_notch_changelog", ROOT / "changelog.py")
+ROOT = Path(__file__).resolve().parents[3]
+SPEC = importlib.util.spec_from_file_location(
+    "codex_notch_changelog", ROOT / "scripts/changelog.py"
+)
 CHANGELOG = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(CHANGELOG)
 
@@ -16,8 +18,8 @@ class ChangelogTests(unittest.TestCase):
     def test_bundled_changelog_matches_app_version_and_renders_release_notes(self):
         releases = CHANGELOG.validate_document(self.document, self.info)
 
-        self.assertEqual(releases[0]["version"], "0.4.12")
-        notes = CHANGELOG.markdown_for(releases, "0.4.12")
+        self.assertEqual(releases[0]["version"], "0.4.13")
+        notes = CHANGELOG.markdown_for(releases, "0.4.13")
         self.assertIn(releases[0]["title"], notes)
         self.assertIn(f"- {releases[0]['changes'][0]}", notes)
 

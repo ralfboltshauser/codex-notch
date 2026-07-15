@@ -5,7 +5,8 @@ INSTALL_DIR="$HOME/.local/lib/codex-notch"
 HOOK="$INSTALL_DIR/codex_notch_remote-v1.py"
 LIVE="$INSTALL_DIR/codex_notch_live-v1.py"
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-CLEANER="$SCRIPT_DIR/remote/codex_notch_remote.py"
+REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+CLEANER="$REPO_ROOT/apps/linux/codex_notch_remote.py"
 
 if [ -x "$HOOK" ]; then
   "$HOOK" --uninstall

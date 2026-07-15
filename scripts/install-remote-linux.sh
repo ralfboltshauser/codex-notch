@@ -12,6 +12,7 @@ command -v python3 >/dev/null 2>&1 || {
 }
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 INSTALL_DIR="$HOME/.local/lib/codex-notch"
 HOOK="$INSTALL_DIR/codex_notch_remote-v1.py"
 LIVE="$INSTALL_DIR/codex_notch_live-v1.py"
@@ -28,8 +29,8 @@ install_atomic() {
   mv -f "$temporary" "$destination"
   trap - EXIT HUP INT TERM
 }
-install_atomic "$SCRIPT_DIR/remote/codex_notch_remote.py" "$HOOK"
-install_atomic "$SCRIPT_DIR/remote/codex_notch_live.py" "$LIVE"
+install_atomic "$REPO_ROOT/apps/linux/codex_notch_remote.py" "$HOOK"
+install_atomic "$REPO_ROOT/apps/linux/codex_notch_live.py" "$LIVE"
 ENDPOINT_HOST=$1 PAIRING_TOKEN=$2 HOST_ID=$HOST_ID SOURCE_NAME=$SOURCE_NAME \
   python3 -c 'import json, os; print(json.dumps({
     "endpoint_host": os.environ["ENDPOINT_HOST"],

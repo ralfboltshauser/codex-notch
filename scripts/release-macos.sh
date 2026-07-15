@@ -10,7 +10,8 @@ if [ "$CODE_SIGN_IDENTITY" = "-" ]; then
 fi
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-DIST_DIR="$SCRIPT_DIR/.build/dist"
+REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+DIST_DIR="$REPO_ROOT/.build/dist"
 APP="$DIST_DIR/Codex Notch.app"
 ARCHIVE="$DIST_DIR/CodexNotch.zip"
 

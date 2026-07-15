@@ -7,10 +7,11 @@ if [ "$(uname -s)" != "Darwin" ]; then
 fi
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-APP_DIR=${1:-"$SCRIPT_DIR/.build/dist/Codex Notch.app"}
+REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+APP_DIR=${1:-"$REPO_ROOT/.build/dist/Codex Notch.app"}
 IDENTITY=${CODE_SIGN_IDENTITY:--}
 
-cd "$SCRIPT_DIR"
+cd "$REPO_ROOT"
 swift build -c release --product CodexNotch
 swift build -c release --product CodexNotchHook
 BIN_DIR=$(swift build -c release --show-bin-path)
@@ -24,11 +25,11 @@ mkdir -p \
   "$APP_DIR/Contents/Resources/remote"
 install -m 0755 "$BIN_DIR/CodexNotch" "$APP_DIR/Contents/MacOS/CodexNotch"
 install -m 0755 "$BIN_DIR/CodexNotchHook" "$APP_DIR/Contents/Helpers/CodexNotchHook"
-install -m 0755 "$SCRIPT_DIR/remote/codex_notch_remote.py" \
+install -m 0755 "$REPO_ROOT/apps/linux/codex_notch_remote.py" \
   "$APP_DIR/Contents/Resources/remote/codex_notch_remote.py"
-install -m 0755 "$SCRIPT_DIR/remote/codex_notch_live.py" \
+install -m 0755 "$REPO_ROOT/apps/linux/codex_notch_live.py" \
   "$APP_DIR/Contents/Resources/remote/codex_notch_live.py"
-install -m 0644 "$SCRIPT_DIR/AppResources/Info.plist" "$APP_DIR/Contents/Info.plist"
+install -m 0644 "$REPO_ROOT/apps/macos/AppResources/Info.plist" "$APP_DIR/Contents/Info.plist"
 RESOURCE_BUNDLE=$(find "$BIN_DIR" -maxdepth 1 -type d \
   -name 'CodexNotch_CodexNotchApp.bundle' -print -quit)
 if [ -z "$RESOURCE_BUNDLE" ]; then
@@ -47,7 +48,7 @@ if [ ! -s "$APP_DIR/Contents/Resources/$(basename "$RESOURCE_BUNDLE")/Changelog.
   exit 1
 fi
 
-SPARKLE_FRAMEWORK=$(find "$SCRIPT_DIR/.build/artifacts" -type d \
+SPARKLE_FRAMEWORK=$(find "$REPO_ROOT/.build/artifacts" -type d \
   -path '*/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework' \
   -print -quit)
 if [ -z "$SPARKLE_FRAMEWORK" ]; then
@@ -55,7 +56,7 @@ if [ -z "$SPARKLE_FRAMEWORK" ]; then
   exit 1
 fi
 ditto "$SPARKLE_FRAMEWORK" "$APP_DIR/Contents/Frameworks/Sparkle.framework"
-SPARKLE_LICENSE=$(find "$SCRIPT_DIR/.build/artifacts" -type f -name LICENSE -print -quit)
+SPARKLE_LICENSE=$(find "$REPO_ROOT/.build/artifacts" -type f -name LICENSE -print -quit)
 if [ -n "$SPARKLE_LICENSE" ]; then
   install -m 0644 "$SPARKLE_LICENSE" \
     "$APP_DIR/Contents/Resources/ThirdPartyNotices/Sparkle-LICENSE"

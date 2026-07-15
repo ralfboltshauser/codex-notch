@@ -11,7 +11,8 @@ if [ "$(uname -s)" != "Darwin" ]; then
 fi
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-PLIST="$SCRIPT_DIR/AppResources/Info.plist"
+REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+PLIST="$REPO_ROOT/apps/macos/AppResources/Info.plist"
 VERSION=$1
 
 printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || {

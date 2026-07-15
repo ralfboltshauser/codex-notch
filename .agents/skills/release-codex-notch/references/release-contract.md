@@ -10,7 +10,7 @@ Use these sources in descending order of authority:
 1. The candidate commit's `.github/workflows/ci.yml` and
    `.github/workflows/release.yml`.
 2. The exact GitHub run, jobs, and logs for that commit.
-3. Repository scripts and `AppResources/Info.plist` from that commit.
+3. Repository scripts and `apps/macos/AppResources/Info.plist` from that commit.
 4. This reference and `docs/update-pipeline.md`.
 5. README examples, which may show an old version.
 
@@ -18,10 +18,10 @@ Use these sources in descending order of authority:
 
 The CI workflow runs for pushes and pull requests.
 
-- `linux` runs the Python unit tests, checks every top-level shell script with
-  `sh -n`, and byte-compiles both remote Python programs.
-- `macos` runs `swift test` and builds the complete app bundle with
-  `build-macos-app.sh` on a macOS runner.
+- `linux` runs `make check-linux`, which exercises Python unit tests, shell
+  syntax, Python compilation, and changelog validation.
+- `macos` runs `make test-macos` and builds the complete app bundle with
+  `scripts/build-macos-app.sh` on a macOS runner.
 
 A Linux workstation cannot validate AppKit type checking, Swift linking, app
 bundle construction, Sparkle framework assembly, code signing, or Gatekeeper.
@@ -62,7 +62,7 @@ The stable Sparkle feed is:
 https://github.com/ralfboltshauser/codex-notch/releases/latest/download/appcast.xml
 ```
 
-`release-macos.sh` is a manual macOS notarization path. It is not the normal
+`scripts/release-macos.sh` is a manual macOS notarization path. It is not the normal
 GitHub/Sparkle publication path and does not replace the tag workflow.
 
 ## Failure map

@@ -15,12 +15,13 @@ Run from the repository root. Read these files before changing anything:
 
 - `.github/workflows/ci.yml`
 - `.github/workflows/release.yml`
-- `prepare-release.sh`
-- `build-macos-app.sh`
-- `AppResources/Info.plist`
-- `Sources/CodexNotchApp/Resources/Changelog.json`
-- `changelog.py`
+- `scripts/prepare-release.sh`
+- `scripts/build-macos-app.sh`
+- `apps/macos/AppResources/Info.plist`
+- `apps/macos/Sources/CodexNotchApp/Resources/Changelog.json`
+- `scripts/changelog.py`
 - `Package.swift`
+- `Makefile`
 - `docs/update-pipeline.md`
 
 Then inspect the independent states:
@@ -63,7 +64,7 @@ version from both Git tags and GitHub Releases; do not trust README examples.
 Require `MAJOR.MINOR.PATCH`, and increment `CFBundleVersion` monotonically.
 
 Before changing `Info.plist`, add a newest-first entry to
-`Sources/CodexNotchApp/Resources/Changelog.json` for the release. Every release
+`apps/macos/Sources/CodexNotchApp/Resources/Changelog.json` for the release. Every release
 must have its own entry. Write a short user-facing title and one to six specific
 changes that describe shipped behavior, not commit mechanics. Never silently
 rewrite a published entry; make factual corrections explicit.
@@ -79,9 +80,9 @@ git log --oneline origin/main..HEAD
 Ensure every intended change is committed to the release PR. A tag cannot
 contain dirty or untracked files.
 
-Update both version fields in `AppResources/Info.plist`:
+Update both version fields in `apps/macos/AppResources/Info.plist`:
 
-- On macOS, run `./prepare-release.sh VERSION`.
+- On macOS, run `./scripts/prepare-release.sh VERSION`.
 - On Ubuntu, use `apply_patch` to set `CFBundleShortVersionString` and increment
   `CFBundleVersion`; `prepare-release.sh` intentionally requires macOS.
 
@@ -92,7 +93,7 @@ VERSION=0.0.0 python3 - <<'PY'
 import os
 import plistlib
 
-with open("AppResources/Info.plist", "rb") as file:
+with open("apps/macos/AppResources/Info.plist", "rb") as file:
     info = plistlib.load(file)
 assert info["CFBundleShortVersionString"] == os.environ["VERSION"]
 assert int(info["CFBundleVersion"]) > 0
@@ -106,8 +107,8 @@ Validate that the newest changelog entry matches the plist version and that the
 history is well-formed:
 
 ```sh
-python3 changelog.py validate
-python3 changelog.py markdown VERSION
+python3 scripts/changelog.py validate
+python3 scripts/changelog.py markdown VERSION
 ```
 
 Treat a missing, generic, empty, duplicate, or mismatched changelog entry as a
@@ -119,16 +120,13 @@ Mirror the Linux CI job exactly, then add Swift parsing as an Ubuntu-only early
 signal:
 
 ```sh
-python3 -m unittest discover -s Tests/LinuxHookTests -v
-for script in *.sh; do sh -n "$script"; done
-python3 -m py_compile remote/codex_notch_remote.py remote/codex_notch_live.py
-python3 changelog.py validate
-find Sources Tests -name '*.swift' -print0 | xargs -0 swiftc -frontend -parse
+make check-linux
+find apps/macos/Sources apps/macos/Tests -name '*.swift' -print0 | xargs -0 swiftc -frontend -parse
 git diff --check
 ```
 
 Do not claim that Swift parsing validates AppKit types or linking. The macOS CI
-job is authoritative for `swift test` and `./build-macos-app.sh`.
+job is authoritative for `make test-macos` and `./scripts/build-macos-app.sh`.
 
 ## Put the candidate through PR CI
 
@@ -188,7 +186,7 @@ gh run watch CI_RUN_ID --exit-status
 Verify the version from that exact commit, not the working tree:
 
 ```sh
-git show "$RELEASE_SHA":AppResources/Info.plist | VERSION=0.0.0 python3 -c \
+git show "$RELEASE_SHA":apps/macos/AppResources/Info.plist | VERSION=0.0.0 python3 -c \
   'import os,plistlib,sys; p=plistlib.loads(sys.stdin.buffer.read()); assert p["CFBundleShortVersionString"] == os.environ["VERSION"]; print(p["CFBundleShortVersionString"], p["CFBundleVersion"])'
 test -z "$(git tag -l "vVERSION")"
 test -z "$(git ls-remote --tags origin "refs/tags/vVERSION")"
@@ -198,10 +196,10 @@ Verify the changelog from that same commit:
 
 ```sh
 DIR=$(mktemp -d)
-git show "$RELEASE_SHA":AppResources/Info.plist > "$DIR/Info.plist"
-git show "$RELEASE_SHA":Sources/CodexNotchApp/Resources/Changelog.json \
+git show "$RELEASE_SHA":apps/macos/AppResources/Info.plist > "$DIR/Info.plist"
+git show "$RELEASE_SHA":apps/macos/Sources/CodexNotchApp/Resources/Changelog.json \
   > "$DIR/Changelog.json"
-python3 changelog.py --plist "$DIR/Info.plist" \
+python3 scripts/changelog.py --plist "$DIR/Info.plist" \
   --changelog "$DIR/Changelog.json" validate
 ```
 
