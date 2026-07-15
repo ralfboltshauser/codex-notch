@@ -1723,7 +1723,7 @@ final class CodexNotchTests: XCTestCase {
         _ = NSApplication.shared
         let overview = CodexUsageOverview(
             limit: CodexWeeklyLimit(remainingPercent: 100, resetsAt: nil),
-            forecast: .learning,
+            forecast: .learning(observedFor: 0),
             recentTrend: nil
         )
         let view = WeeklyUsageHeaderView(
