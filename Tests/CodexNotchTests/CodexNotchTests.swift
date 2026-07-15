@@ -837,6 +837,54 @@ final class CodexNotchTests: XCTestCase {
         ))
     }
 
+    func testNotchHoverTargetTracksTheMeasuredNotchFootprint() {
+        let screenFrame = NSRect(x: 0, y: 0, width: 1512, height: 982)
+        let notch = ScreenNotchGeometry(
+            screenFrame: screenFrame,
+            visibleFrame: NSRect(x: 0, y: 0, width: 1512, height: 944),
+            safeTop: 38,
+            leftArea: NSRect(x: 0, y: 944, width: 656, height: 38),
+            rightArea: NSRect(x: 856, y: 944, width: 656, height: 38)
+        )
+        let target = NotchHoverTarget.rect(screenFrame: screenFrame, notch: notch)
+
+        XCTAssertTrue(notch.hasHardwareNotch)
+        XCTAssertEqual(notch.width, 200, accuracy: 0.5)
+        XCTAssertEqual(target.width, 220, accuracy: 0.5)
+        XCTAssertEqual(target.height, 38, accuracy: 0.5)
+        XCTAssertTrue(target.contains(NSPoint(x: 756, y: 970)))
+        XCTAssertFalse(target.contains(NSPoint(x: 500, y: 970)))
+        XCTAssertFalse(target.contains(NSPoint(x: 756, y: 930)))
+    }
+
+    func testNotchHoverIntentDwellsOnceAndRearmsAfterLeaving() {
+        var intent = NotchHoverIntent(dwellDuration: 0.14)
+
+        XCTAssertFalse(intent.update(isInside: true, at: 1.00))
+        XCTAssertFalse(intent.update(isInside: true, at: 1.13))
+        XCTAssertTrue(intent.update(isInside: true, at: 1.15))
+        XCTAssertFalse(intent.update(isInside: true, at: 2.00))
+        XCTAssertFalse(intent.update(isInside: false, at: 2.01))
+        XCTAssertFalse(intent.update(isInside: true, at: 2.02))
+        XCTAssertTrue(intent.update(isInside: true, at: 2.17))
+    }
+
+    func testNotchHoverUsesSmoothUnpinnedPresentationEvenWhenEmpty() throws {
+        _ = NSApplication.shared
+        let overlay = OverlayController(shouldReduceMotion: { false })
+        let screen = try XCTUnwrap(NSScreen.main ?? NSScreen.screens.first)
+
+        XCTAssertFalse(overlay.hasContent)
+        overlay.showFromNotchHover(on: screen)
+
+        XCTAssertTrue(overlay.isVisibleForTesting)
+        XCTAssertFalse(overlay.isPinnedForTesting)
+        XCTAssertTrue(overlay.hasHideTimerForTesting)
+        XCTAssertTrue(overlay.hasContentAnimationForTesting)
+        XCTAssertEqual(overlay.hoverOpenDurationForTesting, 0.32, accuracy: 0.001)
+        overlay.hide(immediately: true)
+    }
+
     func testTaskBadgesShowNerdLettersOnlyWhileControlShiftAreHeld() {
         _ = NSApplication.shared
         var modifiersHeld = false

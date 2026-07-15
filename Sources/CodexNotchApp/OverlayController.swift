@@ -6,6 +6,7 @@ enum NotchMotion {
     static let easeOut = CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1)
     static let ease = CAMediaTimingFunction(controlPoints: 0.25, 0.10, 0.25, 1)
     static let eventOpenDuration: TimeInterval = 0.24
+    static let hoverOpenDuration: TimeInterval = 0.32
     static let closeDuration: TimeInterval = 0.17
     static let launchDuration: TimeInterval = 0.18
     static let pressInDuration: TimeInterval = 0.10
@@ -1249,6 +1250,7 @@ final class OverlayController {
     var notchWidthForTesting: CGFloat { currentNotchWidth }
     var notchHeightForTesting: CGFloat { currentNotchHeight }
     var eventVisibilityDurationForTesting: TimeInterval { Self.eventVisibilityDuration }
+    var hoverOpenDurationForTesting: TimeInterval { NotchMotion.hoverOpenDuration }
     var isPinnedForTesting: Bool { isPinned }
     var isThemePreviewActiveForTesting: Bool { isThemePreviewActive }
     var hasHideTimerForTesting: Bool { hideTimer?.isValid == true }
@@ -1479,6 +1481,15 @@ final class OverlayController {
             return
         }
         present(autoHide: !isPinned, duration: NotchMotion.eventOpenDuration)
+    }
+
+    func showFromNotchHover(on screen: NSScreen) {
+        guard !isThemePreviewActive, phase != .launching else { return }
+        guard phase != .open, phase != .opening else { return }
+        targetScreen = screen
+        isPinned = false
+        if phase == .hidden { rebuildContent(initiallyExpanded: false) }
+        present(autoHide: true, duration: NotchMotion.hoverOpenDuration)
     }
 
     func setThemePreviewVisible(_ visible: Bool, on screen: NSScreen? = nil) {
@@ -2128,34 +2139,16 @@ final class OverlayController {
     }
 
     private func islandGeometry(for screen: NSScreen) -> IslandGeometry {
-        let menuHeight = screen.frame.maxY - screen.visibleFrame.maxY
-        let safeTop = screen.safeAreaInsets.top
-        let notchHeight = max(CGFloat(28), max(safeTop, menuHeight))
-        let leftArea = screen.auxiliaryTopLeftArea
-        let rightArea = screen.auxiliaryTopRightArea
-        var notchWidth: CGFloat = 128
-        var centerOffset: CGFloat = 0
-        var hasHardwareNotch = false
-        if let leftArea, let rightArea {
-            let measuredGap = rightArea.minX - leftArea.maxX
-            hasHardwareNotch = leftArea.width > 0
-                && rightArea.width > 0
-                && measuredGap >= 80
-                && measuredGap <= screen.frame.width * 0.35
-            if hasHardwareNotch {
-                notchWidth = measuredGap
-                centerOffset = (leftArea.maxX + rightArea.minX) / 2 - screen.frame.midX
-            }
-        }
+        let notch = ScreenNotchGeometry(screen: screen)
         let bodyInset: CGFloat = 34
         let bodyWidth = min(820, max(460, screen.frame.width - 160))
         return IslandGeometry(
             windowWidth: bodyWidth + bodyInset * 2,
             bodyInset: bodyInset,
-            notchWidth: notchWidth,
-            notchHeight: notchHeight,
-            notchCenterOffset: centerOffset,
-            hasHardwareNotch: hasHardwareNotch
+            notchWidth: notch.width,
+            notchHeight: notch.height,
+            notchCenterOffset: notch.centerOffset,
+            hasHardwareNotch: notch.hasHardwareNotch
         )
     }
 
