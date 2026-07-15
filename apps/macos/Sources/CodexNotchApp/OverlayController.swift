@@ -549,7 +549,7 @@ final class HostStatusBadgeView: ClosureButton {
 
     var countTextForTesting: String { countLabel.stringValue }
     var detailTextForTesting: String { detailLabel.stringValue }
-    var countColorForTesting: NSColor { countLabel.textColor }
+    var countColorForTesting: NSColor? { countLabel.textColor }
 }
 
 final class TaskRowView: NSView {
