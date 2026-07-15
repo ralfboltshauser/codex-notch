@@ -1512,6 +1512,7 @@ final class CodexNotchTests: XCTestCase {
     func testOverlayShowsCompactAggregateHostHealth() {
         _ = NSApplication.shared
         let overlay = OverlayController(localHostHealth: { .working })
+        overlay.toggle()
         let initialBadge = overlay.hostStatusButtonForTesting
         let checkedAt = Date(timeIntervalSince1970: 1_784_035_200)
         let host = RemoteHost(
@@ -1529,7 +1530,6 @@ final class CodexNotchTests: XCTestCase {
 
         XCTAssertTrue(overlay.hostStatusButtonForTesting === initialBadge)
         XCTAssertEqual(overlay.remoteStatusTextForTesting, "Host working")
-        overlay.toggle()
         XCTAssertTrue(overlay.isVisibleForTesting)
         XCTAssertEqual(overlay.hostStatusCountForTesting, "2")
         XCTAssertEqual(overlay.hostStatusButtonForTesting?.title, "")
