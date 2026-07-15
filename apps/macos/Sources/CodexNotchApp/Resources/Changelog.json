@@ -1,6 +1,15 @@
 {
   "releases": [
     {
+      "version": "0.4.20",
+      "date": "2026-07-15",
+      "title": "Know what just finished",
+      "changes": [
+        "Stop-hook openings now softly highlight the exact task that brought Codex Notch into view.",
+        "Completed tasks now show a compact relative age that stays current while the notch remains open."
+      ]
+    },
+    {
       "version": "0.4.19",
       "date": "2026-07-15",
       "title": "Your limit, at a glance",
