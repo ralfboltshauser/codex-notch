@@ -671,6 +671,107 @@ final class CodexNotchTests: XCTestCase {
         overlay.hide(immediately: true)
     }
 
+    func testActiveAndCompletedTasksShareTheVisibleShortcutOrder() {
+        _ = NSApplication.shared
+        var modifiersHeld = false
+        let overlay = OverlayController(
+            shouldReduceMotion: { true },
+            shortcutModifierState: { modifiersHeld }
+        )
+        overlay.update(tasks: [
+            CompletedTask(
+                eventID: String(repeating: "3", count: 64),
+                title: "First completed task",
+                url: URL(string: "codex://threads/\(threadID)")!,
+                receivedAt: Date()
+            ),
+            CompletedTask(
+                eventID: String(repeating: "4", count: 64),
+                title: "Second completed task",
+                url: URL(string: "codex://threads/\(threadID)")!,
+                receivedAt: Date()
+            ),
+        ])
+        overlay.update(activeTasks: [
+            ActiveTask(
+                threadID: "active-1",
+                title: "First active task",
+                sourceID: "local",
+                sourceLabel: "This Mac",
+                state: .running,
+                updatedAt: Date()
+            ),
+            ActiveTask(
+                threadID: "active-2",
+                title: "Second active task",
+                sourceID: "local",
+                sourceLabel: "This Mac",
+                state: .waitingForInput,
+                updatedAt: Date()
+            ),
+        ], visible: true)
+
+        XCTAssertEqual(overlay.taskBadgeTextsForTesting, ["1", "2", "3", "4"])
+        overlay.toggle()
+
+        modifiersHeld = true
+        overlay.refreshShortcutModifierStateForTesting()
+        XCTAssertEqual(overlay.taskBadgeTextsForTesting, ["J", "K", "L", "Ö"])
+
+        modifiersHeld = false
+        overlay.refreshShortcutModifierStateForTesting()
+        XCTAssertEqual(overlay.taskBadgeTextsForTesting, ["1", "2", "3", "4"])
+        overlay.hide(immediately: true)
+    }
+
+    func testSharedShortcutIndexOpensActiveThenCompletedTasksAndSkipsActiveDismissal() {
+        _ = NSApplication.shared
+        let overlay = OverlayController(shouldReduceMotion: { true })
+        let completed = CompletedTask(
+            eventID: String(repeating: "5", count: 64),
+            title: "Completed task",
+            url: URL(string: "codex://threads/\(threadID)")!,
+            receivedAt: Date()
+        )
+        let active = ActiveTask(
+            threadID: "active-shortcut",
+            title: "Active task",
+            sourceID: "local",
+            sourceLabel: "This Mac",
+            state: .running,
+            updatedAt: Date()
+        )
+        overlay.update(tasks: [completed])
+        overlay.update(activeTasks: [active], visible: true)
+        var openedActive: ActiveTask?
+        var openedCompleted: CompletedTask?
+        var finishedCompleted: CompletedTask?
+        var dismissedIndex: Int?
+        overlay.onOpenActive = {
+            openedActive = $0
+            return true
+        }
+        overlay.onOpen = {
+            openedCompleted = $0
+            return true
+        }
+        overlay.onOpenFinished = { finishedCompleted = $0 }
+        overlay.onDismiss = { dismissedIndex = $0 }
+
+        overlay.openTask(at: 0, animated: false)
+        XCTAssertEqual(openedActive, active)
+        XCTAssertNil(openedCompleted)
+
+        overlay.openTask(at: 1, animated: false)
+        XCTAssertEqual(openedCompleted, completed)
+        XCTAssertEqual(finishedCompleted, completed)
+
+        overlay.dismissTask(at: 0, animated: false)
+        XCTAssertNil(dismissedIndex)
+        overlay.dismissTask(at: 1, animated: false)
+        XCTAssertEqual(dismissedIndex, 0)
+    }
+
     func testDoNotDisturbSuppressesAutomaticPresentationButKeepsManualToggle() {
         _ = NSApplication.shared
         var automaticOpenAllowed = false
