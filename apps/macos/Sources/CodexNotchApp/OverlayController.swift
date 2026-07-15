@@ -1229,7 +1229,9 @@ final class OverlayController {
     private weak var remoteStatusBadge: RemoteHostStatusBadgeView?
     private weak var emptyStateView: EmptyStateView?
     private weak var weeklyLimitView: WeeklyLimitView?
-    private weak var shortcutLockLabel: NSTextField?
+    private weak var shortcutHintLabel: NSTextField?
+    private weak var activeSectionLabel: NSTextField?
+    private weak var activeFreezeLabel: NSTextField?
     private weak var rootView: HUDContentView?
     private var rowsByEventID: [String: TaskRowView] = [:]
     private var activeTaskRows: [ActiveTaskRowView] = []
@@ -1268,7 +1270,20 @@ final class OverlayController {
     var hasEmptyStateForTesting: Bool { emptyStateView != nil }
     var weeklyLimitViewForTesting: WeeklyLimitView? { weeklyLimitView }
     var isShortcutOrderLockedForTesting: Bool { shortcutLettersVisible }
-    var shortcutLockTextForTesting: String? { shortcutLockLabel?.stringValue }
+    var shortcutHintTextForTesting: String? { shortcutHintLabel?.stringValue }
+    var activeFreezeTextForTesting: String? { activeFreezeLabel?.stringValue }
+    var activeFreezeToolTipForTesting: String? { activeFreezeLabel?.toolTip }
+    var isActiveFreezeIndicatorVisibleForTesting: Bool {
+        activeFreezeLabel?.isHidden == false
+    }
+    var isActiveFreezeIndicatorBesideSectionForTesting: Bool {
+        guard let section = activeSectionLabel,
+              let frozen = activeFreezeLabel,
+              section.superview === frozen.superview else { return false }
+        section.superview?.layoutSubtreeIfNeeded()
+        return frozen.frame.minX >= section.frame.maxX
+            && abs(frozen.frame.midY - section.frame.midY) <= 1
+    }
     var shortcutTaskTitlesForTesting: [String] {
         shortcutActiveTasks.map(\.title) + shortcutCompletedTasks.map(\.title)
     }
@@ -1771,8 +1786,8 @@ final class OverlayController {
         toggleHint.wantsLayer = true
         toggleHint.layer?.cornerRadius = 6
         toggleHint.translatesAutoresizingMaskIntoConstraints = false
-        updateShortcutLockLabel(toggleHint, locked: shortcutLettersVisible, theme: theme)
-        shortcutLockLabel = toggleHint
+        configureShortcutHintLabel(toggleHint, theme: theme)
+        shortcutHintLabel = toggleHint
 
         let activeToggle = ClosureButton { [weak self] in self?.onToggleActiveTasks?() }
         activeToggle.image = NSImage(
@@ -1924,18 +1939,34 @@ final class OverlayController {
         }
 
         activeTaskRows.removeAll()
+        activeSectionLabel = nil
+        activeFreezeLabel = nil
         if !displayedActiveTasks.isEmpty {
             let section = NSTextField(labelWithString: "ACTIVE")
             section.font = theme.font(ofSize: 9.5, weight: .bold)
             section.textColor = theme.tertiaryText
             section.translatesAutoresizingMaskIntoConstraints = false
+            activeSectionLabel = section
+            let frozen = NSTextField(labelWithString: "· FROZEN")
+            frozen.font = theme.font(ofSize: 9.5, weight: .bold)
+            frozen.textColor = theme.accent
+            frozen.toolTip = "Live updates pause while you hold Control–Shift so task shortcuts stay stable. Release the keys to resume."
+            frozen.setAccessibilityLabel("Active tasks frozen")
+            frozen.setAccessibilityValue("Live updates resume when Control and Shift are released")
+            frozen.isHidden = !shortcutLettersVisible
+            frozen.translatesAutoresizingMaskIntoConstraints = false
+            activeFreezeLabel = frozen
             let sectionHost = NSView()
             sectionHost.translatesAutoresizingMaskIntoConstraints = false
             sectionHost.addSubview(section)
+            sectionHost.addSubview(frozen)
             NSLayoutConstraint.activate([
                 sectionHost.heightAnchor.constraint(equalToConstant: 22),
                 section.leadingAnchor.constraint(equalTo: sectionHost.leadingAnchor, constant: 14),
                 section.bottomAnchor.constraint(equalTo: sectionHost.bottomAnchor, constant: -3),
+                frozen.leadingAnchor.constraint(equalTo: section.trailingAnchor, constant: 5),
+                frozen.centerYAnchor.constraint(equalTo: section.centerYAnchor),
+                frozen.trailingAnchor.constraint(lessThanOrEqualTo: sectionHost.trailingAnchor, constant: -14),
             ])
             stack.addArrangedSubview(sectionHost)
             sectionHost.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
@@ -2100,13 +2131,7 @@ final class OverlayController {
         shortcutLettersVisible = visible
         activeTaskRows.forEach { $0.setShortcutLetterVisible(visible) }
         rowsByEventID.values.forEach { $0.setShortcutLetterVisible(visible) }
-        if let shortcutLockLabel {
-            updateShortcutLockLabel(
-                shortcutLockLabel,
-                locked: visible,
-                theme: ThemeStore.shared.activeTheme
-            )
-        }
+        activeFreezeLabel?.isHidden = !visible
         guard !visible else { return }
         lockedActiveTasks = nil
         lockedCompletedTasks = nil
@@ -2123,24 +2148,17 @@ final class OverlayController {
         hideTimer?.invalidate()
     }
 
-    private func updateShortcutLockLabel(
+    private func configureShortcutHintLabel(
         _ label: NSTextField,
-        locked: Bool,
         theme: NotchTheme
     ) {
-        label.stringValue = locked ? "LOCKED" : GlobalHotKeys.toggleShortcutLabel()
-        label.font = .monospacedSystemFont(ofSize: locked ? 9.5 : 10.5, weight: .semibold)
-        label.textColor = locked ? theme.accent : theme.secondaryText
-        label.layer?.backgroundColor = locked
-            ? theme.accent.withAlphaComponent(0.14).cgColor
-            : NSColor.clear.cgColor
-        label.toolTip = locked
-            ? "Task order is frozen until Control and Shift are released"
-            : "Show or hide Codex Notch"
-        label.setAccessibilityLabel(locked ? "Shortcut order locked" : "Toggle Codex Notch")
-        label.setAccessibilityValue(
-            locked ? "Task order is frozen" : GlobalHotKeys.toggleShortcutLabel()
-        )
+        label.stringValue = GlobalHotKeys.toggleShortcutLabel()
+        label.font = .monospacedSystemFont(ofSize: 10.5, weight: .medium)
+        label.textColor = theme.secondaryText
+        label.layer?.backgroundColor = NSColor.clear.cgColor
+        label.toolTip = "Show or hide Codex Notch"
+        label.setAccessibilityLabel("Toggle Codex Notch")
+        label.setAccessibilityValue(GlobalHotKeys.toggleShortcutLabel())
     }
 
     private func screenFrame(_ row: TaskRowView) -> NSRect {
