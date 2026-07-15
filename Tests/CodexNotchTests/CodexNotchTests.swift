@@ -1125,7 +1125,7 @@ final class CodexNotchTests: XCTestCase {
         }
     }
 
-    func testTasksTabTransitionPreservesSettingsWindowWidth() throws {
+    func testSettingsTabTransitionsPreserveFixedWindowGeometry() throws {
         _ = NSApplication.shared
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -1140,18 +1140,21 @@ final class CodexNotchTests: XCTestCase {
         let window = try XCTUnwrap(controller.window)
         window.orderFront(nil)
         defer { window.orderOut(nil) }
-        let originalWidth = controller.settingsBoundsForTesting.width
-        XCTAssertGreaterThan(originalWidth, 700)
+        let expectedSize = OnboardingWindowController.settingsContentSize
+        XCTAssertEqual(controller.settingsBoundsForTesting.width, expectedSize.width, accuracy: 0.5)
+        XCTAssertEqual(controller.settingsBoundsForTesting.height, expectedSize.height, accuracy: 0.5)
 
-        controller.selectTasksTabForTesting()
-        let transitionFinished = expectation(description: "Tasks tab transition finished")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-            transitionFinished.fulfill()
+        for title in ["Tasks", "Sounds", "Connections", "Themes"] {
+            controller.selectSettingsTabForTesting(titled: title)
+            let transitionFinished = expectation(description: "\(title) tab transition finished")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                transitionFinished.fulfill()
+            }
+            wait(for: [transitionFinished], timeout: 1)
+
+            XCTAssertEqual(controller.settingsBoundsForTesting.width, expectedSize.width, accuracy: 0.5)
+            XCTAssertEqual(controller.settingsBoundsForTesting.height, expectedSize.height, accuracy: 0.5)
         }
-        wait(for: [transitionFinished], timeout: 1)
-
-        XCTAssertEqual(controller.settingsBoundsForTesting.width, originalWidth, accuracy: 0.5)
-        XCTAssertGreaterThan(controller.settingsBoundsForTesting.width, 700)
     }
 
     func testSettingsDoNotDisturbTogglePersistsWithoutMacOSFocus() throws {
