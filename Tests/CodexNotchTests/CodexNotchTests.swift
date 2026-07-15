@@ -1185,7 +1185,7 @@ final class CodexNotchTests: XCTestCase {
             controller.settingsTabTitlesForTesting,
             ["Themes", "Tasks", "Sounds", "Connections"]
         )
-        XCTAssertEqual(controller.renderedThemeChoiceCountForTesting, 6)
+        XCTAssertEqual(controller.renderedThemeChoiceCountForTesting, NotchTheme.all.count)
         XCTAssertFalse(controller.hasEmbeddedThemePreviewForTesting)
         XCTAssertGreaterThanOrEqual(SettingsNavigationButton.horizontalContentPadding, 12)
 
@@ -1210,12 +1210,17 @@ final class CodexNotchTests: XCTestCase {
             isHookInstalled: { true }
         )
 
-        XCTAssertEqual(controller.renderedThemeChoiceFramesForTesting.count, 6)
-        for frame in controller.renderedThemeChoiceFramesForTesting {
+        XCTAssertEqual(
+            controller.renderedThemeChoiceFramesForTesting.count,
+            NotchTheme.all.count
+        )
+        let themeFrames = controller.renderedThemeChoiceFramesForTesting
+        for frame in themeFrames {
             XCTAssertGreaterThan(frame.width, 100)
             XCTAssertGreaterThan(frame.height, 60)
-            XCTAssertTrue(controller.settingsBoundsForTesting.intersects(frame))
+            XCTAssertTrue(controller.settingsBoundsForTesting.contains(frame))
         }
+        XCTAssertEqual(Set(themeFrames.map { Int($0.midY.rounded()) }).count, 3)
 
         controller.showSoundsForTesting()
 
@@ -1371,6 +1376,37 @@ final class CodexNotchTests: XCTestCase {
         XCTAssertEqual(themes.activeTheme.id, .aurora)
         XCTAssertEqual(defaults.string(forKey: ThemeStore.defaultsKey), "aurora")
         XCTAssertEqual(ThemeStore(defaults: defaults).selectedID, .aurora)
+    }
+
+    func testThemeCatalogIncludesAuthoredTypographyAndTrueBlackTheme() throws {
+        XCTAssertEqual(NotchTheme.all.count, 9)
+        XCTAssertEqual(NotchTheme.ID.allCases.count, NotchTheme.all.count)
+        XCTAssertEqual(Set(NotchTheme.all.map(\.id)).count, NotchTheme.all.count)
+        XCTAssertEqual(
+            Set(NotchTheme.all.map(\.typography)),
+            Set(NotchTheme.Typography.allCases)
+        )
+
+        let blackout = NotchTheme.theme(for: .blackout)
+        for color in [blackout.hudTop, blackout.hudBottom, blackout.windowTint] {
+            let rgb = try XCTUnwrap(color.usingColorSpace(.deviceRGB))
+            XCTAssertEqual(rgb.redComponent, 0, accuracy: 0.001)
+            XCTAssertEqual(rgb.greenComponent, 0, accuracy: 0.001)
+            XCTAssertEqual(rgb.blueComponent, 0, accuracy: 0.001)
+        }
+
+        let terminalFont = NotchTheme.theme(for: .terminal).font(
+            ofSize: 14,
+            weight: .medium
+        )
+        XCTAssertTrue(terminalFont.fontDescriptor.symbolicTraits.contains(.monoSpace))
+
+        let systemFont = NotchTheme.theme(for: .obsidian).font(ofSize: 14, weight: .medium)
+        let editorialFont = NotchTheme.theme(for: .letterpress).font(
+            ofSize: 14,
+            weight: .medium
+        )
+        XCTAssertNotEqual(editorialFont.fontName, systemFont.fontName)
     }
 
     func testNotificationSoundsResolveFromPackagedApplicationResourcesWithoutModuleFallback() throws {
