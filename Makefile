@@ -4,9 +4,10 @@ MACOS_PACKAGE := $(REPO_ROOT)/apps/macos
 SWIFT_SCRATCH := $(REPO_ROOT)/.build
 
 .PHONY: check-linux test-linux test-scripts compile-python check-shell \
-	validate-changelog test-macos build-macos
+	validate-changelog check-swift-structure test-macos build-macos
 
-check-linux: test-linux test-scripts compile-python check-shell validate-changelog
+check-linux: test-linux test-scripts compile-python check-shell \
+	validate-changelog check-swift-structure
 
 test-linux:
 	python3 -m unittest discover -s apps/linux/tests -v
@@ -18,13 +19,17 @@ compile-python:
 	python3 -m py_compile \
 		apps/linux/codex_notch_remote.py \
 		apps/linux/codex_notch_live.py \
-		scripts/changelog.py
+		scripts/changelog.py \
+		scripts/check_swift_structure.py
 
 check-shell:
 	@for script in scripts/*.sh; do sh -n "$$script"; done
 
 validate-changelog:
 	python3 scripts/changelog.py validate
+
+check-swift-structure:
+	python3 scripts/check_swift_structure.py
 
 test-macos:
 	swift test --package-path "$(MACOS_PACKAGE)" \

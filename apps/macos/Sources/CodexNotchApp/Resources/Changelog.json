@@ -1,6 +1,16 @@
 {
   "releases": [
     {
+      "version": "0.4.21",
+      "date": "2026-07-15",
+      "title": "Built to stay consistent",
+      "changes": [
+        "Settings pages now render as independent components, reducing the risk that one tab can distort another tab’s layout.",
+        "Task highlighting, relative ages, shortcut freezing, weekly usage, and host status now pass through isolated notch components without changing their behavior.",
+        "New release checks block oversized Swift files before they can turn back into hidden UI and test monoliths."
+      ]
+    },
+    {
       "version": "0.4.20",
       "date": "2026-07-15",
       "title": "Know what just finished",
