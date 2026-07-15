@@ -985,9 +985,13 @@ final class WeeklyUsageHeaderView: ClosureButton {
 
     var valueTextForTesting: String { valueLabel.stringValue }
     var valueColorForTesting: NSColor? { valueLabel.textColor }
-    var valueFitsWithoutTruncationForTesting: Bool {
+    var valueAllocatedWidthForTesting: CGFloat {
         layoutSubtreeIfNeeded()
-        return valueLabel.frame.width + 0.5 >= valueLabel.intrinsicContentSize.width
+        return valueLabel.frame.width
+    }
+    var valueIntrinsicWidthForTesting: CGFloat { valueLabel.intrinsicContentSize.width }
+    var valueFitsWithoutTruncationForTesting: Bool {
+        valueAllocatedWidthForTesting + 0.5 >= valueIntrinsicWidthForTesting
     }
 
     private static func toolTip(for overview: CodexUsageOverview, now: Date) -> String {

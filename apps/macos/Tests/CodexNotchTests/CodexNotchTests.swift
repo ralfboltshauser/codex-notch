@@ -1741,7 +1741,11 @@ final class CodexNotchTests: XCTestCase {
         host.layoutSubtreeIfNeeded()
 
         XCTAssertEqual(view.valueTextForTesting, "100%")
-        XCTAssertTrue(view.valueFitsWithoutTruncationForTesting)
+        XCTAssertGreaterThanOrEqual(
+            view.valueAllocatedWidthForTesting + 0.5,
+            view.valueIntrinsicWidthForTesting,
+            "allocated \(view.valueAllocatedWidthForTesting), intrinsic \(view.valueIntrinsicWidthForTesting)"
+        )
         XCTAssertEqual(view.frame.width, 46, accuracy: 0.1)
     }
     func testOverlayReportsVisibleLifetimeForScopedShortcuts() {
