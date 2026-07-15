@@ -366,6 +366,11 @@ final class CodexNotchTests: XCTestCase {
         XCTAssertTrue(commands.contains("/existing-stop"))
         XCTAssertTrue(installer.hasOwnedInstallation)
         XCTAssertFalse(installer.needsRepair)
+        XCTAssertFalse(installer.isTrusted)
+        XCTAssertEqual(
+            installer.localHostHealth,
+            .needsAttention(message: "Local completion hook still needs trust")
+        )
         let movedInstaller = CodexHookInstaller(
             hooksFile: hooksFile,
             executableURL: directory.appendingPathComponent("Moved Hook")
@@ -384,8 +389,13 @@ final class CodexNotchTests: XCTestCase {
         trusted_hash = "sha256:unrelated"
         """.utf8).write(to: configFile)
 
+        XCTAssertTrue(installer.isTrusted)
+        XCTAssertEqual(installer.localHostHealth, .working)
+        XCTAssertFalse(movedInstaller.isTrusted)
+
         try installer.uninstall()
         XCTAssertFalse(installer.isInstalled)
+        XCTAssertFalse(installer.isTrusted)
         let final = try hooksRoot(at: hooksFile)
         let finalHooks = try XCTUnwrap(final["hooks"] as? [String: Any])
         XCTAssertNotNil(finalHooks["PostToolUse"])
@@ -698,6 +708,65 @@ final class CodexNotchTests: XCTestCase {
         XCTAssertEqual(mixed.summaryText, "1 of 2 working")
         XCTAssertEqual(mixed.problemCount, 1)
         XCTAssertEqual(mixed.health(for: second).statusText, "Offline")
+    }
+
+    func testHostHealthOverviewIncludesLocalAndEveryRemoteHost() {
+        let checkedAt = Date(timeIntervalSince1970: 1_784_035_200)
+        let first = RemoteHost(
+            id: "host-1",
+            label: "Build box",
+            sshAlias: "build",
+            endpointHost: "100.64.0.1",
+            createdAt: checkedAt
+        )
+        let second = RemoteHost(
+            id: "host-2",
+            label: "Home server",
+            sshAlias: "home",
+            endpointHost: "100.64.0.2",
+            createdAt: checkedAt
+        )
+        let allWorking = HostHealthOverview(
+            local: .working,
+            remote: RemoteHostHealthSnapshot(
+                hosts: [first, second],
+                healthByHostID: [
+                    first.id: .working(checkedAt: checkedAt),
+                    second.id: .working(checkedAt: checkedAt),
+                ]
+            )
+        )
+
+        XCTAssertEqual(allWorking.totalCount, 3)
+        XCTAssertEqual(allWorking.workingCount, 3)
+        XCTAssertTrue(allWorking.allWorking)
+        XCTAssertEqual(allWorking.badgeDetailText, "hosts working")
+        XCTAssertTrue(allWorking.toolTipText.contains("This Mac: Working"))
+        XCTAssertTrue(allWorking.toolTipText.contains("Build box: Working"))
+        XCTAssertTrue(allWorking.toolTipText.contains("Home server: Working"))
+
+        let mixed = HostHealthOverview(
+            local: .working,
+            remote: RemoteHostHealthSnapshot(
+                hosts: [first, second],
+                healthByHostID: [
+                    first.id: .working(checkedAt: checkedAt),
+                    second.id: .unreachable(
+                        message: "No route to host",
+                        checkedAt: checkedAt
+                    ),
+                ]
+            )
+        )
+        XCTAssertEqual(mixed.totalCount, 3)
+        XCTAssertEqual(mixed.workingCount, 2)
+        XCTAssertEqual(mixed.problemCount, 1)
+        XCTAssertFalse(mixed.allWorking)
+        XCTAssertEqual(mixed.badgeDetailText, "hosts · 2 working")
+        XCTAssertTrue(
+            mixed.toolTipText.contains("Home server: Offline — No route to host")
+        )
+        XCTAssertTrue(mixed.toolTipText.hasSuffix("Click to open Connections."))
     }
 
     func testRemoteHealthSeparatesOfflineHostsFromSSHConfigurationProblems() {
@@ -1411,7 +1480,7 @@ final class CodexNotchTests: XCTestCase {
 
     func testOverlayShowsAggregateRemoteHostHealth() {
         _ = NSApplication.shared
-        let overlay = OverlayController()
+        let overlay = OverlayController(localHostHealth: { .working })
         let checkedAt = Date(timeIntervalSince1970: 1_784_035_200)
         let host = RemoteHost(
             id: "host-1",
@@ -1429,6 +1498,32 @@ final class CodexNotchTests: XCTestCase {
         XCTAssertEqual(overlay.remoteStatusTextForTesting, "Host working")
         overlay.toggle()
         XCTAssertTrue(overlay.isVisibleForTesting)
+        XCTAssertEqual(overlay.hostStatusCountForTesting, "2")
+        XCTAssertEqual(overlay.hostStatusDetailForTesting, "hosts working")
+        XCTAssertTrue(overlay.hostStatusToolTipForTesting?.contains("This Mac: Working") == true)
+        XCTAssertTrue(overlay.hostStatusToolTipForTesting?.contains("Ubuntu: Working") == true)
+        XCTAssertTrue(overlay.hostStatusCountColorForTesting?.isEqual(
+            NSColor(calibratedRed: 0.40, green: 0.91, blue: 0.71, alpha: 1)
+        ) == true)
+
+        var wasHiddenWhenConnectionsOpened = false
+        overlay.onConnections = {
+            wasHiddenWhenConnectionsOpened = !overlay.isVisibleForTesting
+        }
+        overlay.hostStatusButtonForTesting?.performClick(nil)
+        XCTAssertTrue(wasHiddenWhenConnectionsOpened)
+        XCTAssertFalse(overlay.isVisibleForTesting)
+    }
+
+    func testHostStatusBadgeShowsTheLocalHostWithoutAnyRemotes() {
+        _ = NSApplication.shared
+        let overlay = OverlayController(localHostHealth: { .working })
+
+        overlay.toggle()
+
+        XCTAssertEqual(overlay.hostStatusCountForTesting, "1")
+        XCTAssertEqual(overlay.hostStatusDetailForTesting, "host working")
+        XCTAssertTrue(overlay.hostStatusToolTipForTesting?.contains("This Mac: Working") == true)
         overlay.hide(immediately: true)
     }
 
@@ -1662,6 +1757,27 @@ final class CodexNotchTests: XCTestCase {
         XCTAssertTrue(NotificationSound.allCases.filter { $0 != .none }.allSatisfy {
             $0.resourceURL != nil
         })
+    }
+
+    func testPresentConnectionsOverridesThePreviouslySelectedSettingsTab() {
+        _ = NSApplication.shared
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pairings = PairingStore(fileURL: directory.appendingPathComponent("pairings.json"))
+        let pairer = RemoteHostPairer(store: pairings) { _ in }
+        let controller = OnboardingWindowController(
+            pairings: pairings,
+            pairer: pairer,
+            isHookInstalled: { true },
+            shouldReduceMotion: { true }
+        )
+
+        controller.showThemesForTesting()
+        XCTAssertEqual(controller.selectedSettingsTabTitleForTesting, "Themes")
+        controller.presentConnections()
+
+        XCTAssertEqual(controller.selectedSettingsTabTitleForTesting, "Connections")
+        controller.close()
     }
 
     func testBundledChangelogMatchesReleaseAndRendersInSettings() throws {

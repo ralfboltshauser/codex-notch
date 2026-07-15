@@ -48,6 +48,25 @@ enum RemoteHostHealth: Equatable {
     }
 }
 
+enum LocalHostHealth: Equatable {
+    case working
+    case needsAttention(message: String)
+
+    var isWorking: Bool {
+        if case .working = self { return true }
+        return false
+    }
+
+    var statusLine: String {
+        switch self {
+        case .working:
+            return "This Mac: Working"
+        case .needsAttention(let message):
+            return "This Mac: Needs attention — \(message)"
+        }
+    }
+}
+
 struct RemoteHostHealthSnapshot: Equatable {
     static let empty = RemoteHostHealthSnapshot(hosts: [], healthByHostID: [:])
 
@@ -84,6 +103,42 @@ struct RemoteHostHealthSnapshot: Equatable {
             return health(for: hosts[0]).statusText
         }
         return "\(workingCount) of \(total) working"
+    }
+}
+
+struct HostHealthOverview: Equatable {
+    let local: LocalHostHealth
+    let remote: RemoteHostHealthSnapshot
+
+    var totalCount: Int { 1 + remote.hosts.count }
+    var workingCount: Int { (local.isWorking ? 1 : 0) + remote.workingCount }
+    var checkingCount: Int { remote.checkingCount }
+    var problemCount: Int { (local.isWorking ? 0 : 1) + remote.problemCount }
+    var allWorking: Bool {
+        workingCount == totalCount && checkingCount == 0 && problemCount == 0
+    }
+
+    var badgeDetailText: String {
+        if allWorking { return totalCount == 1 ? "host working" : "hosts working" }
+        if checkingCount > 0, problemCount == 0 {
+            return totalCount == 1 ? "host · checking" : "hosts · checking"
+        }
+        if totalCount == 1 { return "host · needs attention" }
+        return "hosts · \(workingCount) working"
+    }
+
+    var toolTipText: String {
+        var lines = [local.statusLine]
+        lines.append(contentsOf: remote.hosts.map { host in
+            let health = remote.health(for: host)
+            if let detail = health.detailText {
+                return "\(host.label): \(health.statusText) — \(detail)"
+            }
+            return "\(host.label): \(health.statusText)"
+        })
+        lines.append("")
+        lines.append("Click to open Connections.")
+        return lines.joined(separator: "\n")
     }
 }
 
