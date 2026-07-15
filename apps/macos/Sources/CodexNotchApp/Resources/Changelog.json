@@ -1,6 +1,16 @@
 {
   "releases": [
     {
+      "version": "0.4.17",
+      "date": "2026-07-15",
+      "title": "The signal, not the noise",
+      "changes": [
+        "Weekly usage now lives as a compact percentage in the header, with forecast, reset, and recent-trend details on hover.",
+        "Host health now stays compact as a colored count; hover still shows every machine and click still opens Connections.",
+        "Removed stray Button text from custom controls and stopped status refreshes from rebuilding or resizing the open notch."
+      ]
+    },
+    {
       "version": "0.4.16",
       "date": "2026-07-15",
       "title": "Every host, every signal",
