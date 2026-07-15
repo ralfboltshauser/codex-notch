@@ -156,6 +156,7 @@ final class FlippedHostStackView: NSStackView {
 
 final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate, NSWindowDelegate {
     static let completionKey = "onboardingComplete.v2"
+    static let settingsContentSize = NSSize(width: 720, height: 650)
 
     private enum SettingsPage {
         case appearance
@@ -233,6 +234,10 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         buildSettingsPage(.tasks)
     }
 
+    func selectSettingsTabForTesting(titled title: String) {
+        settingsTabs.first(where: { $0.title == title })?.performClick(nil)
+    }
+
     init(
         pairings: PairingStore,
         pairer: RemoteHostPairer,
@@ -250,7 +255,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         self.isHookInstalled = isHookInstalled
         self.shouldReduceMotion = shouldReduceMotion
         let window = SettingsWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 720, height: 650),
+            contentRect: NSRect(origin: .zero, size: Self.settingsContentSize),
             styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -261,11 +266,15 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         window.isMovableByWindowBackground = true
         window.backgroundColor = .clear
         window.appearance = NSAppearance(named: .darkAqua)
+        window.contentMinSize = Self.settingsContentSize
+        window.contentMaxSize = Self.settingsContentSize
+        window.setContentSize(Self.settingsContentSize)
         window.center()
         super.init(window: window)
         window.delegate = self
 
         window.contentView = root
+        installContentContainer()
         showAppropriateStep()
     }
 
@@ -315,21 +324,25 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         }
     }
 
-    private func resetContent() {
-        content.removeFromSuperview()
-        content.subviews.forEach { $0.removeFromSuperview() }
+    private func installContentContainer() {
         content.translatesAutoresizingMaskIntoConstraints = false
         content.wantsLayer = true
-        content.layer?.removeAllAnimations()
-        content.layer?.opacity = 1
-        content.layer?.transform = CATransform3DIdentity
         root.addSubview(content)
         NSLayoutConstraint.activate([
+            root.widthAnchor.constraint(equalToConstant: Self.settingsContentSize.width),
+            root.heightAnchor.constraint(equalToConstant: Self.settingsContentSize.height),
             content.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 42),
             content.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -42),
             content.topAnchor.constraint(equalTo: root.topAnchor, constant: 40),
             content.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -32),
         ])
+    }
+
+    private func resetContent() {
+        content.subviews.forEach { $0.removeFromSuperview() }
+        content.layer?.removeAllAnimations()
+        content.layer?.opacity = 1
+        content.layer?.transform = CATransform3DIdentity
     }
 
     private func buildSettingsPage(_ page: SettingsPage) {

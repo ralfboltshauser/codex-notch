@@ -1125,6 +1125,48 @@ final class CodexNotchTests: XCTestCase {
         }
     }
 
+    func testSettingsTabTransitionsPreserveFixedWindowGeometry() throws {
+        _ = NSApplication.shared
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pairings = PairingStore(fileURL: directory.appendingPathComponent("pairings.json"))
+        let pairer = RemoteHostPairer(store: pairings) { _ in }
+        let controller = OnboardingWindowController(
+            pairings: pairings,
+            pairer: pairer,
+            isHookInstalled: { true },
+            shouldReduceMotion: { false }
+        )
+        let window = try XCTUnwrap(controller.window)
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
+        let expectedSize = OnboardingWindowController.settingsContentSize
+        XCTAssertEqual(controller.settingsBoundsForTesting.width, expectedSize.width, accuracy: 0.5)
+        XCTAssertEqual(controller.settingsBoundsForTesting.height, expectedSize.height, accuracy: 0.5)
+
+        for title in ["Tasks", "Sounds", "Connections", "Themes"] {
+            controller.selectSettingsTabForTesting(titled: title)
+            let transitionFinished = expectation(description: "\(title) tab transition finished")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                transitionFinished.fulfill()
+            }
+            wait(for: [transitionFinished], timeout: 1)
+
+            XCTAssertEqual(
+                controller.settingsBoundsForTesting.width,
+                expectedSize.width,
+                accuracy: 0.5,
+                "\(title) changed the settings width"
+            )
+            XCTAssertEqual(
+                controller.settingsBoundsForTesting.height,
+                expectedSize.height,
+                accuracy: 0.5,
+                "\(title) changed the settings height"
+            )
+        }
+    }
+
     func testSettingsDoNotDisturbTogglePersistsWithoutMacOSFocus() throws {
         _ = NSApplication.shared
         let directory = temporaryDirectory()
