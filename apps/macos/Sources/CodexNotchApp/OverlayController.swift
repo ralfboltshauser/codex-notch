@@ -927,7 +927,7 @@ final class WeeklyUsageHeaderView: ClosureButton {
 
         NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: 22),
-            widthAnchor.constraint(greaterThanOrEqualToConstant: 42),
+            widthAnchor.constraint(greaterThanOrEqualToConstant: 46),
             valueLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
             valueLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
             valueLabel.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -0.5),
