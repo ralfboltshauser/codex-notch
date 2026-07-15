@@ -1412,6 +1412,8 @@ final class CodexNotchTests: XCTestCase {
             controller.settingsTabTitlesForTesting,
             ["Themes", "Tasks", "Sounds", "Connections"]
         )
+        XCTAssertEqual(controller.selectedSettingsTabTitleForTesting, "Connections")
+        controller.showThemesForTesting()
         XCTAssertEqual(controller.renderedThemeChoiceCountForTesting, NotchTheme.all.count)
         XCTAssertFalse(controller.hasEmbeddedThemePreviewForTesting)
         XCTAssertGreaterThanOrEqual(SettingsNavigationButton.horizontalContentPadding, 12)
@@ -1436,6 +1438,8 @@ final class CodexNotchTests: XCTestCase {
             pairer: pairer,
             isHookInstalled: { true }
         )
+
+        controller.showThemesForTesting()
 
         XCTAssertEqual(
             controller.renderedThemeChoiceFramesForTesting.count,

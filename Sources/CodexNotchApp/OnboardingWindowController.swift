@@ -255,6 +255,10 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         buildSettingsPage(.sounds)
     }
 
+    func showThemesForTesting() {
+        buildSettingsPage(.appearance)
+    }
+
     func showTasksForTesting() {
         buildSettingsPage(.tasks)
     }
