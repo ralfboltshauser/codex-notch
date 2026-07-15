@@ -28,9 +28,15 @@ link. No network process is involved.
 
 The app also starts the installed Codex CLI's local `app-server` briefly to read
 the authenticated account's rolling rate-limit snapshot. The seven-day window
-is shown as a remaining percentage and reset time in the notch. Codex Notch
-never reads or stores Codex credentials, and refreshes the value after completed
-turns, after wake, when the notch is opened, and every five minutes.
+is shown as remaining capacity, recent usage, reset time, and a local pace
+forecast in the notch. Codex exposes this value as a whole percentage, so Codex
+Notch does not invent sub-percent precision: it checks every 15 minutes (and
+when the notch opens), records percentage changes plus hourly flat checkpoints,
+and waits for at least one hour and a two-point change before estimating when
+capacity will run out. Reset-crossing forecasts account for the one-point
+measurement boundary. Eight weeks of timestamp, percentage, and reset metadata
+are kept locally in a user-only file; prompts and credentials are never read or
+stored.
 
 ### Ubuntu to Mac
 
@@ -152,7 +158,9 @@ Uninstall it with:
 - Remote messages cannot provide a URL or command. Thread IDs must be UUIDs,
   and the app constructs the local or SSH action itself.
 - Weekly usage comes from Codex's local app-server protocol. Codex Notch does
-  not inspect auth files, browser storage, or terminal output.
+  not inspect auth files, browser storage, or terminal output. Its local usage
+  history contains only timestamps, whole remaining percentages, and reset
+  timestamps, and is removed with the rest of the app data during uninstall.
 - Completion events contain only thread ID, turn ID, title, source identity, and
   timestamp. Active snapshots contain only thread ID, title, display state, and
   timestamp.

@@ -198,7 +198,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
     private weak var doNotDisturbButton: ClosureButton?
     private var working = false
     private var contentTransitionID = 0
-    private var selectedPage: SettingsPage = .appearance
+    private var selectedPage: SettingsPage = .connections
     private var themePreviewIsActive = false
     private var themeCards: [ThemeCardButton] = []
     private var soundCards: [NotificationSoundCardButton] = []
@@ -214,6 +214,14 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
     var checkForUpdatesButtonForTesting: NSButton? { checkForUpdatesButton }
     var doNotDisturbButtonForTesting: NSButton? { doNotDisturbButton }
     var settingsTabTitlesForTesting: [String] { settingsTabs.map(\.title) }
+    var selectedSettingsTabTitleForTesting: String {
+        switch selectedPage {
+        case .appearance: return "Themes"
+        case .tasks: return "Tasks"
+        case .sounds: return "Sounds"
+        case .connections: return "Connections"
+        }
+    }
     var renderedThemeChoiceCountForTesting: Int { themeCards.count }
     var renderedSoundChoiceCountForTesting: Int { soundCards.count }
     var renderedThemeChoiceFramesForTesting: [NSRect] {
@@ -245,6 +253,10 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
 
     func showSoundsForTesting() {
         buildSettingsPage(.sounds)
+    }
+
+    func showThemesForTesting() {
+        buildSettingsPage(.appearance)
     }
 
     func showTasksForTesting() {

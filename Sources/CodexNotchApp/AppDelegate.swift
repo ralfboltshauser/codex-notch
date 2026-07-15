@@ -74,8 +74,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updater.onAvailabilityChanged = { [weak self] version in
             self?.overlay.setUpdateAvailable(version: version)
         }
-        usageMonitor.onChange = { [weak self] limit in
-            self?.overlay.setWeeklyLimit(limit)
+        usageMonitor.onChange = { [weak self] overview in
+            self?.overlay.setUsageOverview(overview)
         }
         store.onChange = { [weak self] tasks in self?.overlay.update(tasks: tasks) }
         overlay.update(tasks: store.tasks)
