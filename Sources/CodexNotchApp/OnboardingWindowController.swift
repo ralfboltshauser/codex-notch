@@ -212,6 +212,18 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
     var settingsTabTitlesForTesting: [String] { settingsTabs.map(\.title) }
     var renderedThemeChoiceCountForTesting: Int { themeCards.count }
     var renderedSoundChoiceCountForTesting: Int { soundCards.count }
+    var renderedThemeChoiceFramesForTesting: [NSRect] {
+        root.layoutSubtreeIfNeeded()
+        return themeCards.map { $0.convert($0.bounds, to: root) }
+    }
+    var renderedSoundChoiceFramesForTesting: [NSRect] {
+        root.layoutSubtreeIfNeeded()
+        return soundCards.map { $0.convert($0.bounds, to: root) }
+    }
+    var settingsBoundsForTesting: NSRect {
+        root.layoutSubtreeIfNeeded()
+        return root.bounds
+    }
 
     func showSoundsForTesting() {
         buildSettingsPage(.sounds)
