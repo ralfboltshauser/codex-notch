@@ -963,41 +963,38 @@ final class WeeklyLimitView: NSView {
 final class ActiveTaskRowView: NSView {
     let task: ActiveTask
     private let openHandler: () -> Void
+    private let numberBadge: NumberBadgeView
 
-    init(task: ActiveTask, theme: NotchTheme, open: @escaping () -> Void) {
+    init(task: ActiveTask, index: Int, theme: NotchTheme, open: @escaping () -> Void) {
         self.task = task
         openHandler = open
+        numberBadge = NumberBadgeView(
+            number: index + 1,
+            shortcut: GlobalHotKeys.openShortcutKeyLabel(at: index),
+            theme: theme
+        )
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = true
         layer?.cornerRadius = 12
         layer?.cornerCurve = .continuous
 
-        let symbol: String
         let stateText: String
         let color: NSColor
         switch task.state {
         case .running:
-            symbol = "circle.dotted"
             stateText = "Running"
             color = theme.accent
         case .waitingForApproval:
-            symbol = "checkmark.shield.fill"
             stateText = "Needs approval"
             color = .systemOrange
         case .waitingForInput:
-            symbol = "questionmark.bubble.fill"
             stateText = "Needs input"
             color = .systemOrange
         case .unavailable:
-            symbol = "wifi.slash"
             stateText = "Connection lost"
             color = theme.tertiaryText
         }
-        let icon = NSImageView(image: NSImage(systemSymbolName: symbol, accessibilityDescription: stateText) ?? NSImage())
-        icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
-        icon.contentTintColor = color
-        icon.translatesAutoresizingMaskIntoConstraints = false
         let title = NSTextField(labelWithString: task.title)
         title.font = .systemFont(ofSize: 14, weight: .medium)
         title.textColor = theme.primaryText
@@ -1013,13 +1010,12 @@ final class ActiveTaskRowView: NSView {
         status.font = .systemFont(ofSize: 10.5, weight: .semibold)
         status.textColor = color
         status.translatesAutoresizingMaskIntoConstraints = false
-        [icon, title, source, status].forEach(addSubview)
+        [numberBadge, title, source, status].forEach(addSubview)
         NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: 46),
-            icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 15),
-            icon.centerYAnchor.constraint(equalTo: centerYAnchor),
-            icon.widthAnchor.constraint(equalToConstant: 17),
-            title.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 12),
+            numberBadge.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            numberBadge.centerYAnchor.constraint(equalTo: centerYAnchor),
+            title.leadingAnchor.constraint(equalTo: numberBadge.trailingAnchor, constant: 11),
             title.centerYAnchor.constraint(equalTo: centerYAnchor),
             source.leadingAnchor.constraint(greaterThanOrEqualTo: title.trailingAnchor, constant: 12),
             source.widthAnchor.constraint(lessThanOrEqualToConstant: 120),
@@ -1028,12 +1024,17 @@ final class ActiveTaskRowView: NSView {
             status.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -15),
             status.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
-        toolTip = "Open active task"
-        setAccessibilityLabel("\(task.title), \(stateText), \(task.sourceLabel)")
+        toolTip = GlobalHotKeys.openShortcutLabel(at: index)
+            .map { "Open active task — \($0)" } ?? "Open active task"
+        setAccessibilityLabel(
+            "Task \(index + 1), \(task.title), \(stateText), \(task.sourceLabel)"
+        )
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    func setShortcutLetterVisible(_ visible: Bool) { numberBadge.showShortcut(visible) }
+    var badgeTextForTesting: String { numberBadge.textForTesting }
     override func mouseUp(with event: NSEvent) {
         if bounds.contains(convert(event.locationInWindow, from: nil)) { openHandler() }
     }
@@ -1094,6 +1095,7 @@ final class OverlayController {
     private weak var weeklyLimitView: WeeklyLimitView?
     private weak var rootView: HUDContentView?
     private var rowsByEventID: [String: TaskRowView] = [:]
+    private var activeTaskRows: [ActiveTaskRowView] = []
     private var dismissingEventIDs: Set<String> = []
     private var themeObserver: NSObjectProtocol?
 
@@ -1128,7 +1130,8 @@ final class OverlayController {
     var hasEmptyStateForTesting: Bool { emptyStateView != nil }
     var weeklyLimitViewForTesting: WeeklyLimitView? { weeklyLimitView }
     var taskBadgeTextsForTesting: [String] {
-        presentedTasks.compactMap { rowsByEventID[$0.eventID]?.badgeTextForTesting }
+        activeTaskRows.map(\.badgeTextForTesting)
+            + presentedTasks.compactMap { rowsByEventID[$0.eventID]?.badgeTextForTesting }
     }
     var rowArrivalAnimationCountForTesting: Int {
         rowsByEventID.values.filter(\.hasArrivalAnimationForTesting).count
@@ -1146,6 +1149,9 @@ final class OverlayController {
         guard showsActiveTasks, !activeTasks.isEmpty else { return tasks }
         let activeKeys = Set(activeTasks.map { "\($0.sourceID)\u{0}\($0.threadID.lowercased())" })
         return tasks.filter { !activeKeys.contains("\($0.sourceID)\u{0}\($0.threadID.lowercased())") }
+    }
+    private var displayedActiveTasks: [ActiveTask] {
+        showsActiveTasks ? Array(activeTasks.prefix(4)) : []
     }
 
     init(
@@ -1350,15 +1356,22 @@ final class OverlayController {
     }
 
     func openTask(at index: Int, animated: Bool = true) {
-        let visibleTasks = presentedTasks
-        guard visibleTasks.indices.contains(index) else { return }
-        openTask(visibleTasks[index], animated: animated)
+        let active = displayedActiveTasks
+        if active.indices.contains(index) {
+            openActiveTask(active[index])
+            return
+        }
+        let completedIndex = index - active.count
+        let completed = presentedTasks
+        guard completed.indices.contains(completedIndex) else { return }
+        openTask(completed[completedIndex], animated: animated)
     }
 
     func dismissTask(at index: Int, animated: Bool = true) {
+        let completedIndex = index - displayedActiveTasks.count
         let visibleTasks = presentedTasks
-        guard visibleTasks.indices.contains(index) else { return }
-        let eventID = visibleTasks[index].eventID
+        guard visibleTasks.indices.contains(completedIndex) else { return }
+        let eventID = visibleTasks[completedIndex].eventID
         guard animated,
               !shouldReduceMotion(),
               phase == .open,
@@ -1693,7 +1706,7 @@ final class OverlayController {
             weeklyLimitView = limitView
         }
 
-        let displayedActiveTasks = showsActiveTasks ? Array(activeTasks.prefix(4)) : []
+        activeTaskRows.removeAll()
         if !displayedActiveTasks.isEmpty {
             let section = NSTextField(labelWithString: "ACTIVE")
             section.font = .systemFont(ofSize: 9.5, weight: .bold)
@@ -1709,10 +1722,12 @@ final class OverlayController {
             ])
             stack.addArrangedSubview(sectionHost)
             sectionHost.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-            for task in displayedActiveTasks {
-                let row = ActiveTaskRowView(task: task, theme: theme) { [weak self] in
+            for (index, task) in displayedActiveTasks.enumerated() {
+                let row = ActiveTaskRowView(task: task, index: index, theme: theme) { [weak self] in
                     self?.openActiveTask(task)
                 }
+                row.setShortcutLetterVisible(shortcutLettersVisible)
+                activeTaskRows.append(row)
                 stack.addArrangedSubview(row)
                 row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
             }
@@ -1740,13 +1755,14 @@ final class OverlayController {
         var rows: [TaskRowView] = []
         var rowLookup: [String: TaskRowView] = [:]
         for (index, task) in completedTasks.enumerated() {
+            let shortcutIndex = displayedActiveTasks.count + index
             let row = TaskRowView(
                 task: task,
-                index: index,
+                index: shortcutIndex,
                 theme: theme,
                 shouldReduceMotion: shouldReduceMotion,
                 open: { [weak self] in self?.openTask(task) },
-                dismiss: { [weak self] in self?.dismissTask(at: index) }
+                dismiss: { [weak self] in self?.dismissTask(at: shortcutIndex) }
             )
             if dismissingEventIDs.contains(task.eventID) {
                 row.holdInvisibleForPendingDismissal()
@@ -1857,6 +1873,7 @@ final class OverlayController {
     private func setShortcutLettersVisible(_ visible: Bool) {
         guard shortcutLettersVisible != visible else { return }
         shortcutLettersVisible = visible
+        activeTaskRows.forEach { $0.setShortcutLetterVisible(visible) }
         rowsByEventID.values.forEach { $0.setShortcutLetterVisible(visible) }
     }
 
