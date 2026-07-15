@@ -1010,11 +1010,27 @@ final class CodexNotchTests: XCTestCase {
         overlay.update(activeTasks: [initialActive], visible: true)
         overlay.toggle()
 
+        XCTAssertEqual(
+            overlay.shortcutHintTextForTesting,
+            GlobalHotKeys.toggleShortcutLabel()
+        )
+        XCTAssertFalse(overlay.isActiveFreezeIndicatorVisibleForTesting)
+
         modifiersHeld = true
         overlay.refreshShortcutModifierStateForTesting()
         let lockedHeight = overlay.bodyHeightForTesting
         XCTAssertTrue(overlay.isShortcutOrderLockedForTesting)
-        XCTAssertEqual(overlay.shortcutLockTextForTesting, "LOCKED")
+        XCTAssertEqual(
+            overlay.shortcutHintTextForTesting,
+            GlobalHotKeys.toggleShortcutLabel()
+        )
+        XCTAssertTrue(overlay.isActiveFreezeIndicatorVisibleForTesting)
+        XCTAssertTrue(overlay.isActiveFreezeIndicatorBesideSectionForTesting)
+        XCTAssertEqual(overlay.activeFreezeTextForTesting, "· FROZEN")
+        XCTAssertEqual(
+            overlay.activeFreezeToolTipForTesting,
+            "Live updates pause while you hold Control–Shift so task shortcuts stay stable. Release the keys to resume."
+        )
         XCTAssertEqual(
             overlay.shortcutTaskTitlesForTesting,
             ["Initial active task", "First task"]
@@ -1050,9 +1066,10 @@ final class CodexNotchTests: XCTestCase {
 
         XCTAssertFalse(overlay.isShortcutOrderLockedForTesting)
         XCTAssertEqual(
-            overlay.shortcutLockTextForTesting,
+            overlay.shortcutHintTextForTesting,
             GlobalHotKeys.toggleShortcutLabel()
         )
+        XCTAssertFalse(overlay.isActiveFreezeIndicatorVisibleForTesting)
         XCTAssertEqual(
             overlay.shortcutTaskTitlesForTesting,
             ["Incoming active task", "Incoming task", "First task"]
@@ -1649,8 +1666,8 @@ final class CodexNotchTests: XCTestCase {
 
     func testBundledChangelogMatchesReleaseAndRendersInSettings() throws {
         _ = NSApplication.shared
-        XCTAssertEqual(ChangelogCatalog.releases.first?.version, "0.4.14")
-        XCTAssertGreaterThanOrEqual(ChangelogCatalog.releases.count, 15)
+        XCTAssertEqual(ChangelogCatalog.releases.first?.version, "0.4.15")
+        XCTAssertGreaterThanOrEqual(ChangelogCatalog.releases.count, 16)
         XCTAssertTrue(ChangelogCatalog.releases.allSatisfy {
             !$0.title.isEmpty && !$0.changes.isEmpty
         })

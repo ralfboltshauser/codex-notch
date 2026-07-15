@@ -1,6 +1,15 @@
 {
   "releases": [
     {
+      "version": "0.4.15",
+      "date": "2026-07-15",
+      "title": "Frozen where it belongs",
+      "changes": [
+        "The frozen-view status now appears beside Active tasks instead of replacing the Codex Notch shortcut.",
+        "Hover over Frozen for a concise explanation of why live updates pause and how to resume them."
+      ]
+    },
+    {
       "version": "0.4.14",
       "date": "2026-07-15",
       "title": "Workspaces with clear ownership",
