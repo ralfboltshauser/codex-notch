@@ -492,63 +492,64 @@ final class EmptyStateView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 }
 
-final class RemoteHostStatusBadgeView: NSView {
-    private let dot = NSView()
-    private let label = NSTextField(labelWithString: "")
+final class HostStatusBadgeView: ClosureButton {
+    private let countLabel = NSTextField(labelWithString: "")
+    private let detailLabel = NSTextField(labelWithString: "")
 
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
+    override init(handler: (() -> Void)? = nil) {
+        super.init(handler: handler)
         translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = true
         layer?.backgroundColor = NSColor.white.withAlphaComponent(0.065).cgColor
         layer?.cornerRadius = 9
         layer?.cornerCurve = .continuous
 
-        dot.translatesAutoresizingMaskIntoConstraints = false
-        dot.wantsLayer = true
-        dot.layer?.cornerRadius = 3
-        label.font = .systemFont(ofSize: 10.5, weight: .medium)
-        label.textColor = NSColor.white.withAlphaComponent(0.62)
-        label.lineBreakMode = .byTruncatingTail
-        label.translatesAutoresizingMaskIntoConstraints = false
+        countLabel.font = .monospacedSystemFont(ofSize: 10.5, weight: .semibold)
+        countLabel.alignment = .center
+        countLabel.translatesAutoresizingMaskIntoConstraints = false
+        detailLabel.font = .systemFont(ofSize: 10.5, weight: .medium)
+        detailLabel.textColor = NSColor.white.withAlphaComponent(0.62)
+        detailLabel.lineBreakMode = .byTruncatingTail
+        detailLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        addSubview(dot)
-        addSubview(label)
+        addSubview(countLabel)
+        addSubview(detailLabel)
         NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: 22),
-            dot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            dot.centerYAnchor.constraint(equalTo: centerYAnchor),
-            dot.widthAnchor.constraint(equalToConstant: 6),
-            dot.heightAnchor.constraint(equalToConstant: 6),
-            label.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 6),
-            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            label.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -0.5),
+            countLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            countLabel.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -0.5),
+            countLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 8),
+            detailLabel.leadingAnchor.constraint(equalTo: countLabel.trailingAnchor, constant: 5),
+            detailLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            detailLabel.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -0.5),
         ])
         setContentCompressionResistancePriority(.required, for: .horizontal)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func update(_ snapshot: RemoteHostHealthSnapshot) {
-        label.stringValue = snapshot.summaryText
+    func update(_ overview: HostHealthOverview) {
+        countLabel.stringValue = "\(overview.totalCount)"
+        detailLabel.stringValue = overview.badgeDetailText
         let color: NSColor
-        if snapshot.problemCount > 0 {
-            color = snapshot.workingCount > 0 ? .systemOrange : .systemRed
-        } else if snapshot.checkingCount > 0 {
+        if overview.problemCount > 0 {
+            color = overview.workingCount > 0 ? .systemOrange : .systemRed
+        } else if overview.checkingCount > 0 {
             color = NSColor.white.withAlphaComponent(0.42)
         } else {
             color = NSColor(calibratedRed: 0.40, green: 0.91, blue: 0.71, alpha: 1)
         }
-        dot.layer?.backgroundColor = color.cgColor
-        toolTip = snapshot.hosts.map { host in
-            let health = snapshot.health(for: host)
-            if let detail = health.detailText {
-                return "\(host.label): \(health.statusText) — \(detail)"
-            }
-            return "\(host.label): \(health.statusText)"
-        }.joined(separator: "\n")
-        setAccessibilityLabel("Remote hosts: \(snapshot.summaryText)")
+        countLabel.textColor = color
+        toolTip = overview.toolTipText
+        setAccessibilityLabel(
+            "Host status: \(overview.workingCount) of \(overview.totalCount) working"
+        )
+        setAccessibilityHelp("Open Connections settings")
     }
+
+    var countTextForTesting: String { countLabel.stringValue }
+    var detailTextForTesting: String { detailLabel.stringValue }
+    var countColorForTesting: NSColor? { countLabel.textColor }
 }
 
 final class TaskRowView: NSView {
@@ -1089,6 +1090,96 @@ final class WeeklyLimitView: NSView {
     }
 }
 
+final class WeeklyUsageStatusView: ClosureButton {
+    let statusTextForTesting: String
+    let detailTextForTesting: String
+
+    init(
+        state: CodexUsageState,
+        theme: NotchTheme,
+        retry: @escaping () -> Void
+    ) {
+        let iconName: String
+        let iconDescription: String
+        let iconColor: NSColor
+        let diagnostic: String?
+        switch state {
+        case .loading:
+            statusTextForTesting = "Checking weekly usage…"
+            detailTextForTesting = "Reading your Codex account"
+            iconName = "chart.line.uptrend.xyaxis"
+            iconDescription = "Checking Codex weekly usage"
+            iconColor = theme.accent
+            diagnostic = nil
+        case .unavailable(let message):
+            statusTextForTesting = "Weekly usage unavailable"
+            detailTextForTesting = "Click to retry"
+            iconName = "arrow.clockwise"
+            iconDescription = "Retry Codex weekly usage"
+            iconColor = .systemOrange
+            diagnostic = message
+        case .idle, .available:
+            fatalError("WeeklyUsageStatusView requires a loading or unavailable state")
+        }
+
+        super.init(handler: retry)
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        layer?.cornerRadius = 12
+        layer?.cornerCurve = .continuous
+        layer?.backgroundColor = theme.quietSurface.cgColor
+        layer?.borderColor = theme.border.cgColor
+        layer?.borderWidth = 1
+
+        let icon = NSImageView(image: NSImage(
+            systemSymbolName: iconName,
+            accessibilityDescription: iconDescription
+        ) ?? NSImage())
+        icon.contentTintColor = iconColor
+        icon.translatesAutoresizingMaskIntoConstraints = false
+
+        let title = NSTextField(labelWithString: "Weekly usage")
+        title.font = theme.font(ofSize: 11, weight: .medium)
+        title.textColor = theme.secondaryText
+        title.translatesAutoresizingMaskIntoConstraints = false
+
+        let status = NSTextField(labelWithString: statusTextForTesting)
+        status.font = theme.font(ofSize: 12, weight: .semibold)
+        status.textColor = theme.primaryText
+        status.translatesAutoresizingMaskIntoConstraints = false
+
+        let detail = NSTextField(labelWithString: detailTextForTesting)
+        detail.font = theme.font(ofSize: 10.5, weight: .regular)
+        detail.textColor = theme.tertiaryText
+        detail.translatesAutoresizingMaskIntoConstraints = false
+
+        [icon, title, status, detail].forEach(addSubview)
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 64),
+            icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 13),
+            icon.topAnchor.constraint(equalTo: topAnchor, constant: 10),
+            icon.widthAnchor.constraint(equalToConstant: 13),
+            icon.heightAnchor.constraint(equalToConstant: 13),
+            title.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 7),
+            title.centerYAnchor.constraint(equalTo: icon.centerYAnchor),
+            status.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 13),
+            status.topAnchor.constraint(equalTo: topAnchor, constant: 31),
+            detail.leadingAnchor.constraint(equalTo: status.trailingAnchor, constant: 9),
+            detail.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -13),
+            detail.centerYAnchor.constraint(equalTo: status.centerYAnchor),
+        ])
+
+        toolTip = diagnostic.map { "\($0). Click to retry." }
+            ?? "Codex Notch is checking your seven-day usage window."
+        setAccessibilityElement(true)
+        setAccessibilityLabel("Codex weekly usage")
+        setAccessibilityValue("\(statusTextForTesting). \(detailTextForTesting)")
+        setAccessibilityHelp("Retry reading Codex weekly usage")
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+}
+
 final class ActiveTaskRowView: NSView {
     let task: ActiveTask
     private let openHandler: () -> Void
@@ -1203,6 +1294,7 @@ final class OverlayController {
     private let shouldReduceMotion: () -> Bool
     private let shortcutModifierState: () -> Bool
     private let automaticOpenAllowed: () -> Bool
+    private let localHostHealth: () -> LocalHostHealth
     private var tasks: [CompletedTask] = []
     private var activeTasks: [ActiveTask] = []
     private var showsActiveTasks = ActiveTaskPreferences.shared.isVisible
@@ -1222,13 +1314,14 @@ final class OverlayController {
     private var phase: Phase = .hidden
     private var pendingRebuild = false
     private var updateVersion: String?
-    private var usageOverview: CodexUsageOverview?
+    private var usageState: CodexUsageState = .idle
     private var remoteHealth = RemoteHostHealthSnapshot.empty
     private weak var updateButton: ClosureButton?
     private weak var settingsButton: ClosureButton?
-    private weak var remoteStatusBadge: RemoteHostStatusBadgeView?
+    private weak var hostStatusBadge: HostStatusBadgeView?
     private weak var emptyStateView: EmptyStateView?
     private weak var weeklyLimitView: WeeklyLimitView?
+    private weak var weeklyUsageStatusView: WeeklyUsageStatusView?
     private weak var shortcutHintLabel: NSTextField?
     private weak var activeSectionLabel: NSTextField?
     private weak var activeFreezeLabel: NSTextField?
@@ -1244,6 +1337,8 @@ final class OverlayController {
     var onDismiss: ((Int) -> Void)?
     var onClear: (() -> Void)?
     var onSettings: (() -> Void)?
+    var onConnections: (() -> Void)?
+    var onRefreshUsage: (() -> Void)?
     var onToggleActiveTasks: (() -> Void)?
     var onUpdate: (() -> Void)?
     var onVisibilityChanged: ((Bool) -> Void)?
@@ -1267,8 +1362,16 @@ final class OverlayController {
     var remoteStatusTextForTesting: String? {
         remoteHealth.hosts.isEmpty ? nil : remoteHealth.summaryText
     }
+    var hostStatusCountForTesting: String? { hostStatusBadge?.countTextForTesting }
+    var hostStatusDetailForTesting: String? { hostStatusBadge?.detailTextForTesting }
+    var hostStatusToolTipForTesting: String? { hostStatusBadge?.toolTip }
+    var hostStatusCountColorForTesting: NSColor? { hostStatusBadge?.countColorForTesting }
+    var hostStatusButtonForTesting: NSButton? { hostStatusBadge }
     var hasEmptyStateForTesting: Bool { emptyStateView != nil }
     var weeklyLimitViewForTesting: WeeklyLimitView? { weeklyLimitView }
+    var weeklyUsageStatusViewForTesting: WeeklyUsageStatusView? {
+        weeklyUsageStatusView
+    }
     var isShortcutOrderLockedForTesting: Bool { shortcutLettersVisible }
     var shortcutHintTextForTesting: String? { shortcutHintLabel?.stringValue }
     var activeFreezeTextForTesting: String? { activeFreezeLabel?.stringValue }
@@ -1313,7 +1416,7 @@ final class OverlayController {
         !tasks.isEmpty
             || (showsActiveTasks && !activeTasks.isEmpty)
             || updateVersion != nil
-            || usageOverview != nil
+            || usageState.isVisible
     }
     private var presentedTasks: [CompletedTask] {
         guard showsActiveTasks, !activeTasks.isEmpty else { return tasks }
@@ -1329,9 +1432,15 @@ final class OverlayController {
     private var shortcutCompletedTasks: [CompletedTask] {
         lockedCompletedTasks ?? presentedTasks
     }
+    private var currentHostHealthOverview: HostHealthOverview {
+        HostHealthOverview(local: localHostHealth(), remote: remoteHealth)
+    }
 
     init(
         automaticOpenAllowed: @escaping () -> Bool = { true },
+        localHostHealth: @escaping () -> LocalHostHealth = {
+            CodexHookInstaller().localHostHealth
+        },
         shouldReduceMotion: @escaping () -> Bool = {
             NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         },
@@ -1341,6 +1450,7 @@ final class OverlayController {
         }
     ) {
         self.automaticOpenAllowed = automaticOpenAllowed
+        self.localHostHealth = localHostHealth
         self.shouldReduceMotion = shouldReduceMotion
         self.shortcutModifierState = shortcutModifierState
         panel = FocuslessPanel(
@@ -1455,8 +1565,12 @@ final class OverlayController {
     }
 
     func setUsageOverview(_ overview: CodexUsageOverview?) {
-        guard usageOverview != overview else { return }
-        usageOverview = overview
+        setUsageState(overview.map(CodexUsageState.available) ?? .idle)
+    }
+
+    func setUsageState(_ state: CodexUsageState) {
+        guard usageState != state else { return }
+        usageState = state
         if deferVisibleRebuildWhileShortcutsLocked() { return }
         switch phase {
         case .opening, .closing, .launching:
@@ -1474,7 +1588,7 @@ final class OverlayController {
         remoteHealth = snapshot
         if deferVisibleRebuildWhileShortcutsLocked() { return }
         guard previousIDs != snapshot.hosts.map(\.id) else {
-            remoteStatusBadge?.update(snapshot)
+            hostStatusBadge?.update(currentHostHealthOverview)
             return
         }
         switch phase {
@@ -1553,6 +1667,16 @@ final class OverlayController {
         }
         hide(immediately: true)
         onSettings?()
+    }
+
+    func openConnections() {
+        guard panel.isVisible else { return }
+        if isThemePreviewActive {
+            onConnections?()
+            return
+        }
+        hide(immediately: true)
+        onConnections?()
     }
 
     func openTask(at index: Int, animated: Bool = true) {
@@ -1763,22 +1887,7 @@ final class OverlayController {
         heading.textColor = theme.primaryText
         heading.translatesAutoresizingMaskIntoConstraints = false
 
-        let visibleActiveCount = showsActiveTasks ? activeTasks.count : 0
         let completedTasks = presentedTasks
-        let countText: String
-        if completedTasks.isEmpty && visibleActiveCount == 0 {
-            countText = updateVersion == nil ? "Nothing waiting" : "Update ready"
-        } else if visibleActiveCount > 0 && !completedTasks.isEmpty {
-            countText = "\(visibleActiveCount) active · \(completedTasks.count) completed"
-        } else if visibleActiveCount > 0 {
-            countText = "\(visibleActiveCount) active"
-        } else {
-            countText = "\(completedTasks.count) completed"
-        }
-        let count = NSTextField(labelWithString: countText)
-        count.font = theme.font(ofSize: 11, weight: .medium)
-        count.textColor = theme.secondaryText
-        count.translatesAutoresizingMaskIntoConstraints = false
 
         let toggleHint = NSTextField(labelWithString: GlobalHotKeys.toggleShortcutLabel())
         toggleHint.font = .monospacedSystemFont(ofSize: 10.5, weight: .medium)
@@ -1834,18 +1943,13 @@ final class OverlayController {
 
         let header = NSView()
         header.translatesAutoresizingMaskIntoConstraints = false
-        var headerViews: [NSView] = [codexIcon, heading, count]
-        let statusBadge: RemoteHostStatusBadgeView?
-        if remoteHealth.hosts.isEmpty {
-            statusBadge = nil
-            remoteStatusBadge = nil
-        } else {
-            let badge = RemoteHostStatusBadgeView()
-            badge.update(remoteHealth)
-            statusBadge = badge
-            remoteStatusBadge = badge
-            headerViews.append(badge)
+        var headerViews: [NSView] = [codexIcon, heading]
+        let statusBadge = HostStatusBadgeView { [weak self] in
+            self?.openConnections()
         }
+        statusBadge.update(currentHostHealthOverview)
+        hostStatusBadge = statusBadge
+        headerViews.append(statusBadge)
         headerViews.append(contentsOf: [toggleHint, activeToggle, clear, update, settings])
         headerViews.forEach(header.addSubview)
         var headerConstraints = [
@@ -1856,8 +1960,6 @@ final class OverlayController {
             codexIcon.heightAnchor.constraint(equalToConstant: 16),
             heading.leadingAnchor.constraint(equalTo: codexIcon.trailingAnchor, constant: 8),
             heading.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-            count.leadingAnchor.constraint(equalTo: heading.trailingAnchor, constant: 8),
-            count.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             update.leadingAnchor.constraint(equalTo: clear.trailingAnchor, constant: 6),
             update.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             update.widthAnchor.constraint(equalToConstant: 24),
@@ -1877,26 +1979,17 @@ final class OverlayController {
             settings.heightAnchor.constraint(equalToConstant: 24),
             clear.centerYAnchor.constraint(equalTo: header.centerYAnchor),
         ]
-        if let statusBadge {
-            headerConstraints.append(contentsOf: [
-                statusBadge.leadingAnchor.constraint(
-                    greaterThanOrEqualTo: count.trailingAnchor,
-                    constant: 12
-                ),
-                statusBadge.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-                clear.leadingAnchor.constraint(
-                    greaterThanOrEqualTo: statusBadge.trailingAnchor,
-                    constant: 8
-                ),
-            ])
-        } else {
-            headerConstraints.append(
-                clear.leadingAnchor.constraint(
-                    greaterThanOrEqualTo: count.trailingAnchor,
-                    constant: 12
-                )
-            )
-        }
+        headerConstraints.append(contentsOf: [
+            statusBadge.leadingAnchor.constraint(
+                equalTo: heading.trailingAnchor,
+                constant: 12
+            ),
+            statusBadge.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            clear.leadingAnchor.constraint(
+                greaterThanOrEqualTo: statusBadge.trailingAnchor,
+                constant: 8
+            ),
+        ])
         if let exclusion = Self.menuBarNotchExclusion(
             notchWidth: geometry.notchWidth,
             centerOffset: geometry.notchCenterOffset,
@@ -1905,7 +1998,6 @@ final class OverlayController {
             let notchGuide = NSLayoutGuide()
             header.addLayoutGuide(notchGuide)
             let notchCenter = (exclusion.lowerBound + exclusion.upperBound) / 2
-            let leftHeaderGroup: NSView = statusBadge.map { $0 as NSView } ?? count
             headerConstraints.append(contentsOf: [
                 notchGuide.centerXAnchor.constraint(
                     equalTo: header.centerXAnchor,
@@ -1914,7 +2006,7 @@ final class OverlayController {
                 notchGuide.widthAnchor.constraint(
                     equalToConstant: exclusion.upperBound - exclusion.lowerBound
                 ),
-                leftHeaderGroup.trailingAnchor.constraint(
+                statusBadge.trailingAnchor.constraint(
                     lessThanOrEqualTo: notchGuide.leadingAnchor
                 ),
                 clear.leadingAnchor.constraint(
@@ -1931,11 +2023,25 @@ final class OverlayController {
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.addArrangedSubview(header)
 
-        if let usageOverview {
+        weeklyLimitView = nil
+        weeklyUsageStatusView = nil
+        switch usageState {
+        case .available(let usageOverview):
             let limitView = WeeklyLimitView(overview: usageOverview, theme: theme)
             stack.addArrangedSubview(limitView)
             limitView.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
             weeklyLimitView = limitView
+        case .loading, .unavailable:
+            let statusView = WeeklyUsageStatusView(
+                state: usageState,
+                theme: theme,
+                retry: { [weak self] in self?.onRefreshUsage?() }
+            )
+            stack.addArrangedSubview(statusView)
+            statusView.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+            weeklyUsageStatusView = statusView
+        case .idle:
+            break
         }
 
         activeTaskRows.removeAll()
@@ -2056,7 +2162,7 @@ final class OverlayController {
         let contentHeight: CGFloat = completedTasks.isEmpty && displayedActiveTasks.isEmpty
             ? 168
             : 62 + CGFloat(completedTasks.count * 48 + activeHeight + completedSectionHeight)
-        let weeklyLimitHeight: CGFloat = usageOverview == nil ? 0 : 66
+        let weeklyLimitHeight: CGFloat = usageState.isVisible ? 66 : 0
         // contentHeight historically included the 18-point gap below the hardware
         // notch. The header now occupies the menu-bar band, so reclaim that gap
         // while preserving every row's existing vertical rhythm.
