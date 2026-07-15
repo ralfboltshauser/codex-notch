@@ -276,6 +276,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         onboarding?.onCheckForUpdates = { [weak self] in
             self?.updater.checkForUpdates()
         }
+        onboarding?.onThemePreviewVisibilityChanged = { [weak self] visible, screen in
+            self?.overlay.setThemePreviewVisible(visible, on: screen)
+        }
         onboarding?.onUninstall = { [weak self] completion in
             self?.uninstall(completion: completion)
         }

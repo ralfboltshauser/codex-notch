@@ -1085,6 +1085,7 @@ final class CodexNotchTests: XCTestCase {
             ["Themes", "Tasks", "Sounds", "Connections"]
         )
         XCTAssertEqual(controller.renderedThemeChoiceCountForTesting, 6)
+        XCTAssertFalse(controller.hasEmbeddedThemePreviewForTesting)
         XCTAssertGreaterThanOrEqual(SettingsNavigationButton.horizontalContentPadding, 12)
 
         controller.showSoundsForTesting()
@@ -1123,6 +1124,61 @@ final class CodexNotchTests: XCTestCase {
             XCTAssertGreaterThan(frame.height, 40)
             XCTAssertTrue(controller.settingsBoundsForTesting.intersects(frame))
         }
+    }
+
+    func testThemeTabKeepsRealNotchOpenAndReleasesItWhenLeaving() {
+        _ = NSApplication.shared
+        let previousMainMenu = NSApp.mainMenu
+        let previousWindowsMenu = NSApp.windowsMenu
+        NSApp.setActivationPolicy(.accessory)
+        let directory = temporaryDirectory()
+        defer {
+            NSApp.mainMenu = previousMainMenu
+            NSApp.windowsMenu = previousWindowsMenu
+            NSApp.setActivationPolicy(.accessory)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let pairings = PairingStore(fileURL: directory.appendingPathComponent("pairings.json"))
+        let pairer = RemoteHostPairer(store: pairings) { _ in }
+        let overlay = OverlayController(shouldReduceMotion: { true })
+        let controller = OnboardingWindowController(
+            pairings: pairings,
+            pairer: pairer,
+            isHookInstalled: { true },
+            shouldReduceMotion: { true }
+        )
+        controller.onThemePreviewVisibilityChanged = { visible, screen in
+            overlay.setThemePreviewVisible(visible, on: screen)
+        }
+
+        controller.present()
+        XCTAssertFalse(controller.hasEmbeddedThemePreviewForTesting)
+        XCTAssertTrue(overlay.isThemePreviewActiveForTesting)
+        XCTAssertTrue(overlay.isPinnedForTesting)
+        XCTAssertTrue(overlay.isVisibleForTesting)
+        XCTAssertFalse(overlay.hasHideTimerForTesting)
+
+        overlay.toggle()
+        XCTAssertTrue(overlay.isThemePreviewActiveForTesting)
+        XCTAssertTrue(overlay.isPinnedForTesting)
+        XCTAssertTrue(overlay.isVisibleForTesting)
+
+        controller.selectSettingsTabForTesting(titled: "Tasks")
+        waitForMainQueue(seconds: 0.2)
+        XCTAssertFalse(overlay.isThemePreviewActiveForTesting)
+        XCTAssertFalse(overlay.isPinnedForTesting)
+        XCTAssertFalse(overlay.isVisibleForTesting)
+
+        controller.selectSettingsTabForTesting(titled: "Themes")
+        waitForMainQueue(seconds: 0.2)
+        XCTAssertTrue(overlay.isThemePreviewActiveForTesting)
+        XCTAssertTrue(overlay.isPinnedForTesting)
+        XCTAssertTrue(overlay.isVisibleForTesting)
+
+        controller.close()
+        XCTAssertFalse(overlay.isThemePreviewActiveForTesting)
+        XCTAssertFalse(overlay.isPinnedForTesting)
+        XCTAssertFalse(overlay.isVisibleForTesting)
     }
 
     func testSettingsTabTransitionsPreserveFixedWindowGeometry() throws {
@@ -1214,6 +1270,52 @@ final class CodexNotchTests: XCTestCase {
         XCTAssertEqual(themes.activeTheme.id, .aurora)
         XCTAssertEqual(defaults.string(forKey: ThemeStore.defaultsKey), "aurora")
         XCTAssertEqual(ThemeStore(defaults: defaults).selectedID, .aurora)
+    }
+
+    func testNotificationSoundsResolveFromPackagedApplicationResourcesWithoutModuleFallback() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let resources = directory.appendingPathComponent("Contents/Resources", isDirectory: true)
+        let sounds = resources
+            .appendingPathComponent(NotificationSound.resourceBundleName, isDirectory: true)
+            .appendingPathComponent("Sounds", isDirectory: true)
+        try FileManager.default.createDirectory(at: sounds, withIntermediateDirectories: true)
+
+        for sound in NotificationSound.allCases where sound != .none {
+            let expectedURL = sounds
+                .appendingPathComponent(sound.rawValue)
+                .appendingPathExtension("mp3")
+            try Data([0x49, 0x44, 0x33]).write(to: expectedURL)
+            var usedFallback = false
+
+            let resolvedURL = sound.resourceURL(
+                applicationResourcesURL: resources,
+                fallbackBundle: {
+                    usedFallback = true
+                    return nil
+                }
+            )
+
+            XCTAssertEqual(resolvedURL, expectedURL)
+            XCTAssertFalse(usedFallback, "\(sound.name) unexpectedly evaluated Bundle.module")
+        }
+    }
+
+    func testMissingPackagedSoundFailsQuietlyWhenFallbackIsUnavailable() {
+        let missingResources = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: missingResources) }
+        var usedFallback = false
+
+        let resolvedURL = NotificationSound.glassDrop.resourceURL(
+            applicationResourcesURL: missingResources,
+            fallbackBundle: {
+                usedFallback = true
+                return nil
+            }
+        )
+
+        XCTAssertNil(resolvedURL)
+        XCTAssertTrue(usedFallback)
     }
 
     func testTailscaleListenerReportsReadyBeforePairingContinues() throws {
@@ -1340,6 +1442,14 @@ final class CodexNotchTests: XCTestCase {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("codex-notch-\(UUID())")
         try! FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
+    }
+
+    private func waitForMainQueue(seconds: TimeInterval) {
+        let finished = expectation(description: "Main queue advanced")
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) {
+            finished.fulfill()
+        }
+        wait(for: [finished], timeout: seconds + 1)
     }
 
     private func hooksRoot(at url: URL) throws -> [String: Any] {

@@ -1077,6 +1077,7 @@ final class OverlayController {
     private var shortcutLettersVisible = false
     private var targetScreen: NSScreen?
     private var isPinned = false
+    private var isThemePreviewActive = false
     private var currentBodyInset: CGFloat = 0
     private var currentNotchWidth: CGFloat = 0
     private var currentNotchHeight: CGFloat = 0
@@ -1112,6 +1113,7 @@ final class OverlayController {
     var notchHeightForTesting: CGFloat { currentNotchHeight }
     var eventVisibilityDurationForTesting: TimeInterval { Self.eventVisibilityDuration }
     var isPinnedForTesting: Bool { isPinned }
+    var isThemePreviewActiveForTesting: Bool { isThemePreviewActive }
     var hasHideTimerForTesting: Bool { hideTimer?.isValid == true }
     var isVisibleForTesting: Bool { panel.isVisible }
     var isLaunchingForTesting: Bool { phase == .launching }
@@ -1308,7 +1310,20 @@ final class OverlayController {
         present(autoHide: !isPinned, duration: NotchMotion.eventOpenDuration)
     }
 
+    func setThemePreviewVisible(_ visible: Bool, on screen: NSScreen? = nil) {
+        guard isThemePreviewActive != visible else { return }
+        isThemePreviewActive = visible
+        if visible {
+            targetScreen = screen ?? screenUnderPointer()
+            isPinned = true
+            present(autoHide: false, duration: 0)
+        } else {
+            hide(immediately: true)
+        }
+    }
+
     func toggle() {
+        guard !isThemePreviewActive else { return }
         switch phase {
         case .hidden:
             targetScreen = screenUnderPointer()
@@ -1326,6 +1341,10 @@ final class OverlayController {
 
     func openSettings() {
         guard panel.isVisible else { return }
+        if isThemePreviewActive {
+            onSettings?()
+            return
+        }
         hide(immediately: true)
         onSettings?()
     }
