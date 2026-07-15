@@ -1194,6 +1194,14 @@ final class CodexNotchTests: XCTestCase {
 
         XCTAssertEqual(overlay.taskBadgeTextsForTesting, ["1", "2", "3", "4"])
         overlay.toggle()
+        func labelTexts(in view: NSView) -> [String] {
+            let ownText = (view as? NSTextField).map { [$0.stringValue] } ?? []
+            return ownText + view.subviews.flatMap(labelTexts)
+        }
+        let visibleLabels = labelTexts(in: try! XCTUnwrap(overlay.contentViewForTesting))
+        XCTAssertFalse(visibleLabels.contains("2 active · 2 completed"))
+        XCTAssertFalse(visibleLabels.contains("2 active"))
+        XCTAssertFalse(visibleLabels.contains("2 completed"))
 
         modifiersHeld = true
         overlay.refreshShortcutModifierStateForTesting()

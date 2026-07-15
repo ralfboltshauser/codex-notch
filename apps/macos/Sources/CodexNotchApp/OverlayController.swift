@@ -1788,22 +1788,7 @@ final class OverlayController {
         heading.textColor = theme.primaryText
         heading.translatesAutoresizingMaskIntoConstraints = false
 
-        let visibleActiveCount = showsActiveTasks ? activeTasks.count : 0
         let completedTasks = presentedTasks
-        let countText: String
-        if completedTasks.isEmpty && visibleActiveCount == 0 {
-            countText = updateVersion == nil ? "Nothing waiting" : "Update ready"
-        } else if visibleActiveCount > 0 && !completedTasks.isEmpty {
-            countText = "\(visibleActiveCount) active · \(completedTasks.count) completed"
-        } else if visibleActiveCount > 0 {
-            countText = "\(visibleActiveCount) active"
-        } else {
-            countText = "\(completedTasks.count) completed"
-        }
-        let count = NSTextField(labelWithString: countText)
-        count.font = theme.font(ofSize: 11, weight: .medium)
-        count.textColor = theme.secondaryText
-        count.translatesAutoresizingMaskIntoConstraints = false
 
         let toggleHint = NSTextField(labelWithString: GlobalHotKeys.toggleShortcutLabel())
         toggleHint.font = .monospacedSystemFont(ofSize: 10.5, weight: .medium)
@@ -1859,7 +1844,7 @@ final class OverlayController {
 
         let header = NSView()
         header.translatesAutoresizingMaskIntoConstraints = false
-        var headerViews: [NSView] = [codexIcon, heading, count]
+        var headerViews: [NSView] = [codexIcon, heading]
         let statusBadge = HostStatusBadgeView { [weak self] in
             self?.openConnections()
         }
@@ -1876,8 +1861,6 @@ final class OverlayController {
             codexIcon.heightAnchor.constraint(equalToConstant: 16),
             heading.leadingAnchor.constraint(equalTo: codexIcon.trailingAnchor, constant: 8),
             heading.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-            count.leadingAnchor.constraint(equalTo: heading.trailingAnchor, constant: 8),
-            count.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             update.leadingAnchor.constraint(equalTo: clear.trailingAnchor, constant: 6),
             update.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             update.widthAnchor.constraint(equalToConstant: 24),
@@ -1899,7 +1882,7 @@ final class OverlayController {
         ]
         headerConstraints.append(contentsOf: [
             statusBadge.leadingAnchor.constraint(
-                greaterThanOrEqualTo: count.trailingAnchor,
+                equalTo: heading.trailingAnchor,
                 constant: 12
             ),
             statusBadge.centerYAnchor.constraint(equalTo: header.centerYAnchor),
