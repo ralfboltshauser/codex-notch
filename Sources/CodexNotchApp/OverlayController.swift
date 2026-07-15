@@ -1211,6 +1211,7 @@ final class OverlayController {
     private var shortcutLettersVisible = false
     private var lockedActiveTasks: [ActiveTask]?
     private var lockedCompletedTasks: [CompletedTask]?
+    private var eventAutoCloseCanBeCancelled = false
     private var targetScreen: NSScreen?
     private var isPinned = false
     private var isThemePreviewActive = false
@@ -1474,7 +1475,11 @@ final class OverlayController {
 
     func showForEvent() {
         guard automaticOpenAllowed(), hasContent else { return }
-        if shortcutLettersVisible, panel.isVisible { return }
+        if !isPinned { eventAutoCloseCanBeCancelled = true }
+        if shortcutLettersVisible, panel.isVisible {
+            makeEventPresentationPersistent()
+            return
+        }
         if phase == .hidden { targetScreen = screenUnderPointer() }
         if phase == .open || phase == .opening {
             if !isPinned { scheduleHide(after: Self.eventVisibilityDuration) }
@@ -1488,6 +1493,7 @@ final class OverlayController {
         guard phase != .open, phase != .opening else { return }
         targetScreen = screen
         isPinned = false
+        eventAutoCloseCanBeCancelled = false
         if phase == .hidden { rebuildContent(initiallyExpanded: false) }
         present(autoHide: true, duration: NotchMotion.hoverOpenDuration)
     }
@@ -1495,6 +1501,7 @@ final class OverlayController {
     func setThemePreviewVisible(_ visible: Bool, on screen: NSScreen? = nil) {
         guard isThemePreviewActive != visible else { return }
         isThemePreviewActive = visible
+        eventAutoCloseCanBeCancelled = false
         if visible {
             targetScreen = screen ?? screenUnderPointer()
             isPinned = true
@@ -1510,9 +1517,11 @@ final class OverlayController {
         case .hidden:
             targetScreen = screenUnderPointer()
             isPinned = true
+            eventAutoCloseCanBeCancelled = false
             present(autoHide: false, duration: 0)
         case .closing:
             isPinned = true
+            eventAutoCloseCanBeCancelled = false
             present(autoHide: false, duration: 0)
         case .launching:
             break
@@ -1589,6 +1598,7 @@ final class OverlayController {
     func hide(immediately: Bool = false) {
         hideTimer?.invalidate()
         isPinned = false
+        eventAutoCloseCanBeCancelled = false
         transitionID &+= 1
         let hidingTransitionID = transitionID
         guard phase != .hidden || panel.isVisible else { return }
@@ -1632,7 +1642,7 @@ final class OverlayController {
 
     private func present(autoHide: Bool, duration: TimeInterval) {
         if phase == .open || phase == .opening {
-            if autoHide { scheduleHide(after: Self.eventVisibilityDuration) }
+            if autoHide, !isPinned { scheduleHide(after: Self.eventVisibilityDuration) }
             return
         }
 
@@ -1674,7 +1684,7 @@ final class OverlayController {
                 self.finishPendingRebuild(expanded: true)
             }
         }
-        if autoHide { scheduleHide(after: Self.eventVisibilityDuration) }
+        if autoHide, !isPinned { scheduleHide(after: Self.eventVisibilityDuration) }
     }
 
     private func openTask(_ task: CompletedTask, animated: Bool = true) {
@@ -2085,6 +2095,7 @@ final class OverlayController {
             lockedActiveTasks = displayedActiveTasks
             lockedCompletedTasks = presentedTasks
             hideTimer?.invalidate()
+            makeEventPresentationPersistent()
         }
         shortcutLettersVisible = visible
         activeTaskRows.forEach { $0.setShortcutLetterVisible(visible) }
@@ -2103,6 +2114,13 @@ final class OverlayController {
             finishPendingRebuild(expanded: true)
             if !isPinned { scheduleHide(after: Self.eventVisibilityDuration) }
         }
+    }
+
+    private func makeEventPresentationPersistent() {
+        guard eventAutoCloseCanBeCancelled, panel.isVisible else { return }
+        eventAutoCloseCanBeCancelled = false
+        isPinned = true
+        hideTimer?.invalidate()
     }
 
     private func updateShortcutLockLabel(

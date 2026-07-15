@@ -871,7 +871,11 @@ final class CodexNotchTests: XCTestCase {
 
     func testNotchHoverUsesSmoothUnpinnedPresentationEvenWhenEmpty() throws {
         _ = NSApplication.shared
-        let overlay = OverlayController(shouldReduceMotion: { false })
+        var modifiersHeld = false
+        let overlay = OverlayController(
+            shouldReduceMotion: { false },
+            shortcutModifierState: { modifiersHeld }
+        )
         let screen = try XCTUnwrap(NSScreen.main ?? NSScreen.screens.first)
 
         XCTAssertFalse(overlay.hasContent)
@@ -882,6 +886,16 @@ final class CodexNotchTests: XCTestCase {
         XCTAssertTrue(overlay.hasHideTimerForTesting)
         XCTAssertTrue(overlay.hasContentAnimationForTesting)
         XCTAssertEqual(overlay.hoverOpenDurationForTesting, 0.32, accuracy: 0.001)
+
+        modifiersHeld = true
+        overlay.refreshShortcutModifierStateForTesting()
+        XCTAssertFalse(overlay.isPinnedForTesting)
+        XCTAssertFalse(overlay.hasHideTimerForTesting)
+
+        modifiersHeld = false
+        overlay.refreshShortcutModifierStateForTesting()
+        XCTAssertFalse(overlay.isPinnedForTesting)
+        XCTAssertTrue(overlay.hasHideTimerForTesting)
         overlay.hide(immediately: true)
     }
 
@@ -917,6 +931,43 @@ final class CodexNotchTests: XCTestCase {
         modifiersHeld = false
         overlay.refreshShortcutModifierStateForTesting()
         XCTAssertEqual(overlay.taskBadgeTextsForTesting, ["1", "2"])
+        overlay.hide(immediately: true)
+    }
+
+    func testControlShiftMakesAnAutomaticEventOpeningPersistent() {
+        _ = NSApplication.shared
+        var modifiersHeld = false
+        let overlay = OverlayController(
+            shouldReduceMotion: { true },
+            shortcutModifierState: { modifiersHeld }
+        )
+        overlay.update(tasks: [CompletedTask(
+            eventID: String(repeating: "e", count: 64),
+            title: "Finished while working",
+            url: URL(string: "codex://threads/\(threadID)")!,
+            receivedAt: Date()
+        )])
+
+        overlay.showForEvent()
+
+        XCTAssertTrue(overlay.isVisibleForTesting)
+        XCTAssertFalse(overlay.isPinnedForTesting)
+        XCTAssertTrue(overlay.hasHideTimerForTesting)
+
+        modifiersHeld = true
+        overlay.refreshShortcutModifierStateForTesting()
+
+        XCTAssertTrue(overlay.isShortcutOrderLockedForTesting)
+        XCTAssertTrue(overlay.isPinnedForTesting)
+        XCTAssertFalse(overlay.hasHideTimerForTesting)
+
+        modifiersHeld = false
+        overlay.refreshShortcutModifierStateForTesting()
+
+        XCTAssertFalse(overlay.isShortcutOrderLockedForTesting)
+        XCTAssertTrue(overlay.isPinnedForTesting)
+        XCTAssertFalse(overlay.hasHideTimerForTesting)
+        XCTAssertTrue(overlay.isVisibleForTesting)
         overlay.hide(immediately: true)
     }
 
