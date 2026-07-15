@@ -379,6 +379,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 enum CodexNotchApp {
     static func main() {
+        if CommandLine.arguments.contains("--validate-packaged-resources") {
+            guard !ChangelogCatalog.releases.isEmpty else {
+                FileHandle.standardError.write(Data("Packaged changelog could not be loaded\n".utf8))
+                exit(1)
+            }
+            return
+        }
         if CommandLine.arguments.contains("--prepare-uninstall") {
             let pairings = PairingStore()
             let pairer = RemoteHostPairer(store: pairings) { _ in }

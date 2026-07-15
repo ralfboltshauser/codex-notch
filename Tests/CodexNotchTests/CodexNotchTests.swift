@@ -1649,8 +1649,8 @@ final class CodexNotchTests: XCTestCase {
 
     func testBundledChangelogMatchesReleaseAndRendersInSettings() throws {
         _ = NSApplication.shared
-        XCTAssertEqual(ChangelogCatalog.releases.first?.version, "0.4.11")
-        XCTAssertGreaterThanOrEqual(ChangelogCatalog.releases.count, 12)
+        XCTAssertEqual(ChangelogCatalog.releases.first?.version, "0.4.12")
+        XCTAssertGreaterThanOrEqual(ChangelogCatalog.releases.count, 13)
         XCTAssertTrue(ChangelogCatalog.releases.allSatisfy {
             !$0.title.isEmpty && !$0.changes.isEmpty
         })
@@ -1678,6 +1678,53 @@ final class CodexNotchTests: XCTestCase {
             ChangelogCatalog.releases.map(\.version)
         )
         XCTAssertTrue(controller.changelogUsesVerticalScrollingForTesting)
+    }
+
+    func testChangelogResolvesFromPackagedApplicationResourcesWithoutModuleFallback() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let resources = directory.appendingPathComponent("Contents/Resources", isDirectory: true)
+        let resourceBundle = resources.appendingPathComponent(
+            ChangelogCatalog.resourceBundleName,
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: resourceBundle,
+            withIntermediateDirectories: true
+        )
+        let expectedURL = resourceBundle.appendingPathComponent("Changelog.json")
+        try Data("""
+        {"releases":[{"version":"1.2.3","date":"2026-07-15","title":"Packaged notes","changes":["Loaded safely."]}]}
+        """.utf8).write(to: expectedURL)
+        var usedFallback = false
+
+        let releases = ChangelogCatalog.load(
+            applicationResourcesURL: resources,
+            fallbackBundle: {
+                usedFallback = true
+                return nil
+            }
+        )
+
+        XCTAssertEqual(releases.first?.version, "1.2.3")
+        XCTAssertFalse(usedFallback, "Packaged changelog unexpectedly evaluated Bundle.module")
+    }
+
+    func testMissingPackagedChangelogFailsQuietlyWhenFallbackIsUnavailable() {
+        let missingResources = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: missingResources) }
+        var usedFallback = false
+
+        let releases = ChangelogCatalog.load(
+            applicationResourcesURL: missingResources,
+            fallbackBundle: {
+                usedFallback = true
+                return nil
+            }
+        )
+
+        XCTAssertTrue(releases.isEmpty)
+        XCTAssertTrue(usedFallback)
     }
 
     func testSettingsThemeAndSoundChoicesReceiveVisibleFrames() throws {
