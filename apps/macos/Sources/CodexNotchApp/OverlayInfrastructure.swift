@@ -1,6 +1,15 @@
 import AppKit
 import QuartzCore
 
+struct IslandGeometry {
+    let windowWidth: CGFloat
+    let bodyInset: CGFloat
+    let notchWidth: CGFloat
+    let notchHeight: CGFloat
+    let notchCenterOffset: CGFloat
+    let hasHardwareNotch: Bool
+}
+
 enum NotchMotion {
     static let easeOut = CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1)
     static let ease = CAMediaTimingFunction(controlPoints: 0.25, 0.10, 0.25, 1)

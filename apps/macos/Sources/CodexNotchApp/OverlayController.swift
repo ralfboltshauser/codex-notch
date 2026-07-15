@@ -1,14 +1,6 @@
 import AppKit
 import CoreGraphics
 import QuartzCore
-private struct IslandGeometry {
-    let windowWidth: CGFloat
-    let bodyInset: CGFloat
-    let notchWidth: CGFloat
-    let notchHeight: CGFloat
-    let notchCenterOffset: CGFloat
-    let hasHardwareNotch: Bool
-}
 
 final class OverlayController {
     static let eventVisibilityDuration: TimeInterval = 5
