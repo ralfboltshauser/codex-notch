@@ -197,7 +197,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if inserted {
                 usageMonitor.refresh()
                 notificationSounds.playSelected()
-                overlay.showForEvent()
+                overlay.showForEvent(triggeringEventID: task.eventID)
             }
             return inserted ? .accepted : .duplicate
         } catch {

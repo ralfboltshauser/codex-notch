@@ -950,6 +950,111 @@ final class CodexNotchTests: XCTestCase {
         overlay.hide(immediately: true)
     }
 
+    func testCompletionRelativeTimeUsesCompactStableUnits() {
+        let now = Date(timeIntervalSince1970: 1_784_500_000)
+
+        XCTAssertEqual(CompletionRelativeTime.text(since: now, now: now), "Just now")
+        XCTAssertEqual(
+            CompletionRelativeTime.text(since: now.addingTimeInterval(-59), now: now),
+            "Just now"
+        )
+        XCTAssertEqual(
+            CompletionRelativeTime.text(since: now.addingTimeInterval(-60), now: now),
+            "1 min ago"
+        )
+        XCTAssertEqual(
+            CompletionRelativeTime.text(since: now.addingTimeInterval(-3_599), now: now),
+            "59 min ago"
+        )
+        XCTAssertEqual(
+            CompletionRelativeTime.text(since: now.addingTimeInterval(-3_600), now: now),
+            "1 hr ago"
+        )
+        XCTAssertEqual(
+            CompletionRelativeTime.text(since: now.addingTimeInterval(-86_400), now: now),
+            "1 d ago"
+        )
+        XCTAssertEqual(
+            CompletionRelativeTime.text(since: now.addingTimeInterval(30), now: now),
+            "Just now",
+            "Remote clock skew must not produce a negative age"
+        )
+    }
+
+    func testStopHookOpeningHighlightsOnlyItsTaskAndKeepsRelativeAgesFresh() {
+        _ = NSApplication.shared
+        var now = Date(timeIntervalSince1970: 1_784_500_000)
+        let newest = CompletedTask(
+            eventID: String(repeating: "1", count: 64),
+            title: "Newest task",
+            url: URL(string: "codex://threads/\(threadID)")!,
+            receivedAt: now.addingTimeInterval(-10)
+        )
+        let triggering = CompletedTask(
+            eventID: String(repeating: "2", count: 64),
+            title: "Task that opened the notch",
+            url: URL(string: "codex://threads/019f5d4f-3a8d-76c0-8c2d-19451190e029")!,
+            receivedAt: now.addingTimeInterval(-3 * 60)
+        )
+        let overlay = OverlayController(now: { now }, shouldReduceMotion: { true })
+        overlay.update(tasks: [newest, triggering])
+
+        XCTAssertEqual(overlay.taskRelativeTimesForTesting, ["Just now", "3 min ago"])
+        XCTAssertTrue(overlay.triggeredTaskEventIDsForTesting.isEmpty)
+
+        overlay.showForEvent(triggeringEventID: triggering.eventID)
+
+        XCTAssertTrue(overlay.isVisibleForTesting)
+        XCTAssertEqual(overlay.triggeredTaskEventIDsForTesting, [triggering.eventID])
+
+        now.addTimeInterval(2 * 60)
+        overlay.refreshRelativeTimesForTesting()
+        XCTAssertEqual(overlay.taskRelativeTimesForTesting, ["2 min ago", "5 min ago"])
+
+        overlay.hide(immediately: true)
+        XCTAssertTrue(overlay.triggeredTaskEventIDsForTesting.isEmpty)
+        overlay.toggle()
+        XCTAssertTrue(
+            overlay.triggeredTaskEventIDsForTesting.isEmpty,
+            "A later manual opening must not reuse an old stop-hook highlight"
+        )
+        overlay.hide(immediately: true)
+    }
+
+    func testCompletedTaskRowTimeAndHighlightFitWithoutAmbiguousLayout() {
+        _ = NSApplication.shared
+        let now = Date(timeIntervalSince1970: 1_784_500_000)
+        let task = CompletedTask(
+            eventID: String(repeating: "3", count: 64),
+            title: "A task title that can yield space before fixed metadata truncates",
+            sourceLabel: "ralfs-ubuntu",
+            url: URL(string: "codex://threads/\(threadID)")!,
+            receivedAt: now.addingTimeInterval(-59 * 60)
+        )
+        let row = TaskRowView(
+            task: task,
+            index: 0,
+            theme: NotchTheme.all[0],
+            now: now,
+            isTriggered: true,
+            shouldReduceMotion: { true },
+            open: {},
+            dismiss: {}
+        )
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 460, height: 46))
+        host.addSubview(row)
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            row.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            row.topAnchor.constraint(equalTo: host.topAnchor),
+        ])
+        host.layoutSubtreeIfNeeded()
+
+        XCTAssertFalse(row.hasAmbiguousLayout)
+        XCTAssertEqual(row.relativeTimeTextForTesting, "59 min ago")
+        XCTAssertTrue(row.isTriggeredForTesting)
+    }
+
     func testMenuBarHeaderReservesTheMeasuredHardwareNotch() {
         let exclusion = try! XCTUnwrap(OverlayController.menuBarNotchExclusionForTesting(
             notchWidth: 180,
@@ -1209,6 +1314,44 @@ final class CodexNotchTests: XCTestCase {
         overlay.openTask(at: 1, animated: false)
         XCTAssertEqual(openedActiveTitle, "Incoming active task")
         XCTAssertEqual(openedTitle, "Incoming task")
+        overlay.hide(immediately: true)
+    }
+
+    func testStopHookHighlightWaitsForShortcutFreezeToEnd() {
+        _ = NSApplication.shared
+        var modifiersHeld = false
+        let first = CompletedTask(
+            eventID: String(repeating: "6", count: 64),
+            title: "Visible before shortcuts freeze",
+            url: URL(string: "codex://threads/\(threadID)")!,
+            receivedAt: Date()
+        )
+        let incoming = CompletedTask(
+            eventID: String(repeating: "7", count: 64),
+            title: "Finished while shortcuts are frozen",
+            url: URL(string: "codex://threads/019f5d4f-3a8d-76c0-8c2d-19451190e029")!,
+            receivedAt: Date()
+        )
+        let overlay = OverlayController(
+            shouldReduceMotion: { true },
+            shortcutModifierState: { modifiersHeld }
+        )
+        overlay.update(tasks: [first])
+        overlay.toggle()
+        modifiersHeld = true
+        overlay.refreshShortcutModifierStateForTesting()
+
+        overlay.update(tasks: [incoming, first])
+        overlay.showForEvent(triggeringEventID: incoming.eventID)
+
+        XCTAssertTrue(overlay.triggeredTaskEventIDsForTesting.isEmpty)
+        XCTAssertEqual(overlay.shortcutTaskTitlesForTesting, [first.title])
+
+        modifiersHeld = false
+        overlay.refreshShortcutModifierStateForTesting()
+
+        XCTAssertEqual(overlay.triggeredTaskEventIDsForTesting, [incoming.eventID])
+        XCTAssertEqual(overlay.shortcutTaskTitlesForTesting, [incoming.title, first.title])
         overlay.hide(immediately: true)
     }
 
@@ -1941,8 +2084,8 @@ final class CodexNotchTests: XCTestCase {
 
     func testBundledChangelogMatchesReleaseAndRendersInSettings() throws {
         _ = NSApplication.shared
-        XCTAssertEqual(ChangelogCatalog.releases.first?.version, "0.4.19")
-        XCTAssertGreaterThanOrEqual(ChangelogCatalog.releases.count, 20)
+        XCTAssertEqual(ChangelogCatalog.releases.first?.version, "0.4.20")
+        XCTAssertGreaterThanOrEqual(ChangelogCatalog.releases.count, 21)
         XCTAssertTrue(ChangelogCatalog.releases.allSatisfy {
             !$0.title.isEmpty && !$0.changes.isEmpty
         })

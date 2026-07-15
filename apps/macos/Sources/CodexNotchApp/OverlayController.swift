@@ -16,6 +16,16 @@ enum NotchMotion {
     static let reducedMotionFadeDuration: TimeInterval = 0.12
 }
 
+enum CompletionRelativeTime {
+    static func text(since completedAt: Date, now: Date = Date()) -> String {
+        let age = max(0, now.timeIntervalSince(completedAt))
+        if age < 60 { return "Just now" }
+        if age < 60 * 60 { return "\(Int(age / 60)) min ago" }
+        if age < 24 * 60 * 60 { return "\(Int(age / (60 * 60))) hr ago" }
+        return "\(Int(age / (24 * 60 * 60))) d ago"
+    }
+}
+
 final class FocuslessPanel: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
@@ -570,17 +580,21 @@ final class TaskRowView: NSView {
     private let shouldReduceMotion: () -> Bool
     private let dismissButton: ClosureButton
     private let numberBadge: NumberBadgeView
+    private let relativeTimeLabel: NSTextField
     private let theme: NotchTheme
     private var tracking: NSTrackingArea?
     private var isHovered = false
     private var isTrackingPress = false
     private var isPressed = false
     private var isDismissing = false
+    private var isTriggered: Bool
 
     init(
         task: CompletedTask,
         index: Int,
         theme: NotchTheme,
+        now: Date,
+        isTriggered: Bool,
         shouldReduceMotion: @escaping () -> Bool,
         open: @escaping () -> Void,
         dismiss: @escaping () -> Void
@@ -588,8 +602,12 @@ final class TaskRowView: NSView {
         self.task = task
         self.theme = theme
         self.shouldReduceMotion = shouldReduceMotion
+        self.isTriggered = isTriggered
         openHandler = open
         dismissButton = ClosureButton(handler: dismiss)
+        relativeTimeLabel = NSTextField(
+            labelWithString: CompletionRelativeTime.text(since: task.receivedAt, now: now)
+        )
         numberBadge = NumberBadgeView(
             number: index + 1,
             shortcut: GlobalHotKeys.openShortcutKeyLabel(at: index),
@@ -600,6 +618,11 @@ final class TaskRowView: NSView {
         wantsLayer = true
         layer?.cornerRadius = 12
         layer?.cornerCurve = .continuous
+        layer?.backgroundColor = (isTriggered ? theme.surface : NSColor.clear).cgColor
+        layer?.borderWidth = isTriggered ? 1 : 0
+        layer?.borderColor = theme.accent.withAlphaComponent(0.28).cgColor
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
 
         let title = NSTextField(labelWithString: task.title)
         title.font = theme.font(ofSize: 14, weight: .medium)
@@ -616,6 +639,15 @@ final class TaskRowView: NSView {
         source.translatesAutoresizingMaskIntoConstraints = false
         source.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
 
+        relativeTimeLabel.font = theme.font(ofSize: 10.5, weight: .medium)
+        relativeTimeLabel.textColor = isTriggered
+            ? theme.accent.withAlphaComponent(0.82)
+            : theme.tertiaryText
+        relativeTimeLabel.lineBreakMode = .byTruncatingTail
+        relativeTimeLabel.translatesAutoresizingMaskIntoConstraints = false
+        relativeTimeLabel.setContentHuggingPriority(.required, for: .horizontal)
+        relativeTimeLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
         let shortcut = NSTextField(
             labelWithString: GlobalHotKeys.openShortcutLabel(at: index) ?? ""
         )
@@ -630,7 +662,7 @@ final class TaskRowView: NSView {
         dismissButton.alphaValue = 0
         dismissButton.translatesAutoresizingMaskIntoConstraints = false
 
-        [numberBadge, title, source, shortcut, dismissButton].forEach(addSubview)
+        [numberBadge, title, source, relativeTimeLabel, shortcut, dismissButton].forEach(addSubview)
         NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: 46),
             numberBadge.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
@@ -640,7 +672,9 @@ final class TaskRowView: NSView {
             source.leadingAnchor.constraint(greaterThanOrEqualTo: title.trailingAnchor, constant: 14),
             source.widthAnchor.constraint(lessThanOrEqualToConstant: 120),
             source.centerYAnchor.constraint(equalTo: centerYAnchor),
-            shortcut.leadingAnchor.constraint(equalTo: source.trailingAnchor, constant: 12),
+            relativeTimeLabel.leadingAnchor.constraint(equalTo: source.trailingAnchor, constant: 10),
+            relativeTimeLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            shortcut.leadingAnchor.constraint(equalTo: relativeTimeLabel.trailingAnchor, constant: 12),
             shortcut.centerYAnchor.constraint(equalTo: centerYAnchor),
             dismissButton.leadingAnchor.constraint(equalTo: shortcut.trailingAnchor, constant: 8),
             dismissButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
@@ -648,6 +682,7 @@ final class TaskRowView: NSView {
             dismissButton.widthAnchor.constraint(equalToConstant: 24),
             dismissButton.heightAnchor.constraint(equalToConstant: 24),
         ])
+        updateAccessibilityValue()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -657,7 +692,41 @@ final class TaskRowView: NSView {
         numberBadge.showShortcut(visible)
     }
 
+    func setTriggered(_ triggered: Bool, animated: Bool = true) {
+        guard isTriggered != triggered else { return }
+        isTriggered = triggered
+        relativeTimeLabel.textColor = triggered
+            ? theme.accent.withAlphaComponent(0.82)
+            : theme.tertiaryText
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer?.borderWidth = triggered ? 1 : 0
+        layer?.borderColor = theme.accent.withAlphaComponent(0.28).cgColor
+        CATransaction.commit()
+        updateAccessibilityValue()
+        updateAppearance(
+            duration: animated ? NotchMotion.reducedMotionFadeDuration : 0,
+            timingFunction: NotchMotion.easeOut
+        )
+    }
+
+    func updateRelativeTime(now: Date) {
+        relativeTimeLabel.stringValue = CompletionRelativeTime.text(
+            since: task.receivedAt,
+            now: now
+        )
+        updateAccessibilityValue()
+    }
+
+    private func updateAccessibilityValue() {
+        setAccessibilityLabel(task.title)
+        let age = relativeTimeLabel.stringValue
+        setAccessibilityValue(isTriggered ? "Triggered this opening. \(age)." : age)
+    }
+
     var badgeTextForTesting: String { numberBadge.textForTesting }
+    var relativeTimeTextForTesting: String { relativeTimeLabel.stringValue }
+    var isTriggeredForTesting: Bool { isTriggered }
 
     override func mouseDown(with event: NSEvent) {
         isTrackingPress = true
@@ -697,8 +766,9 @@ final class TaskRowView: NSView {
         timingFunction: CAMediaTimingFunction
     ) {
         guard let layer else { return }
+        let restingBackground = isTriggered ? theme.surface : NSColor.clear
         let targetBackground = (
-            isPressed ? theme.pressedSurface : (isHovered ? theme.hoverSurface : NSColor.clear)
+            isPressed ? theme.pressedSurface : (isHovered ? theme.hoverSurface : restingBackground)
         ).cgColor
         let targetTransform = isPressed && !shouldReduceMotion()
             ? CATransform3DMakeScale(0.98, 0.98, 1)
@@ -1161,11 +1231,13 @@ final class OverlayController {
     private let shortcutModifierState: () -> Bool
     private let automaticOpenAllowed: () -> Bool
     private let localHostHealth: () -> LocalHostHealth
+    private let now: () -> Date
     private var tasks: [CompletedTask] = []
     private var activeTasks: [ActiveTask] = []
     private var showsActiveTasks = ActiveTaskPreferences.shared.isVisible
     private var hideTimer: Timer?
     private var shortcutModifierTimer: Timer?
+    private var relativeTimeTimer: Timer?
     private var shortcutLettersVisible = false
     private var lockedActiveTasks: [ActiveTask]?
     private var lockedCompletedTasks: [CompletedTask]?
@@ -1194,6 +1266,7 @@ final class OverlayController {
     private var rowsByEventID: [String: TaskRowView] = [:]
     private var activeTaskRows: [ActiveTaskRowView] = []
     private var dismissingEventIDs: Set<String> = []
+    private var triggeringEventID: String?
     private var themeObserver: NSObjectProtocol?
 
     var onOpen: ((CompletedTask) -> Bool)?
@@ -1262,6 +1335,14 @@ final class OverlayController {
         activeTaskRows.map(\.badgeTextForTesting)
             + presentedTasks.compactMap { rowsByEventID[$0.eventID]?.badgeTextForTesting }
     }
+    var taskRelativeTimesForTesting: [String] {
+        presentedTasks.compactMap { rowsByEventID[$0.eventID]?.relativeTimeTextForTesting }
+    }
+    var triggeredTaskEventIDsForTesting: [String] {
+        presentedTasks.compactMap { task in
+            rowsByEventID[task.eventID]?.isTriggeredForTesting == true ? task.eventID : nil
+        }
+    }
     var rowArrivalAnimationCountForTesting: Int {
         rowsByEventID.values.filter(\.hasArrivalAnimationForTesting).count
     }
@@ -1315,6 +1396,7 @@ final class OverlayController {
         localHostHealth: @escaping () -> LocalHostHealth = {
             CodexHookInstaller().localHostHealth
         },
+        now: @escaping () -> Date = Date.init,
         shouldReduceMotion: @escaping () -> Bool = {
             NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         },
@@ -1325,6 +1407,7 @@ final class OverlayController {
     ) {
         self.automaticOpenAllowed = automaticOpenAllowed
         self.localHostHealth = localHostHealth
+        self.now = now
         self.shouldReduceMotion = shouldReduceMotion
         self.shortcutModifierState = shortcutModifierState
         panel = FocuslessPanel(
@@ -1357,6 +1440,7 @@ final class OverlayController {
 
     deinit {
         shortcutModifierTimer?.invalidate()
+        relativeTimeTimer?.invalidate()
         if let themeObserver { NotificationCenter.default.removeObserver(themeObserver) }
     }
 
@@ -1480,8 +1564,11 @@ final class OverlayController {
         }
     }
 
-    func showForEvent() {
+    func showForEvent(triggeringEventID: String? = nil) {
         guard automaticOpenAllowed(), hasContent else { return }
+        if let triggeringEventID {
+            setTriggeringEventID(triggeringEventID)
+        }
         if !isPinned { eventAutoCloseCanBeCancelled = true }
         if shortcutLettersVisible, panel.isVisible {
             makeEventPresentationPersistent()
@@ -1498,6 +1585,7 @@ final class OverlayController {
     func showFromNotchHover(on screen: NSScreen) {
         guard !isThemePreviewActive, phase != .launching else { return }
         guard phase != .open, phase != .opening else { return }
+        setTriggeringEventID(nil, animated: false)
         targetScreen = screen
         isPinned = false
         eventAutoCloseCanBeCancelled = false
@@ -1510,6 +1598,7 @@ final class OverlayController {
         isThemePreviewActive = visible
         eventAutoCloseCanBeCancelled = false
         if visible {
+            setTriggeringEventID(nil, animated: false)
             targetScreen = screen ?? screenUnderPointer()
             isPinned = true
             present(autoHide: false, duration: 0)
@@ -1522,11 +1611,13 @@ final class OverlayController {
         guard !isThemePreviewActive else { return }
         switch phase {
         case .hidden:
+            setTriggeringEventID(nil, animated: false)
             targetScreen = screenUnderPointer()
             isPinned = true
             eventAutoCloseCanBeCancelled = false
             present(autoHide: false, duration: 0)
         case .closing:
+            setTriggeringEventID(nil, animated: false)
             isPinned = true
             eventAutoCloseCanBeCancelled = false
             present(autoHide: false, duration: 0)
@@ -2001,6 +2092,8 @@ final class OverlayController {
                 task: task,
                 index: shortcutIndex,
                 theme: theme,
+                now: now(),
+                isTriggered: task.eventID == triggeringEventID,
                 shouldReduceMotion: shouldReduceMotion,
                 open: { [weak self] in self?.openTask(task) },
                 dismiss: { [weak self] in self?.dismissTask(at: shortcutIndex) }
@@ -2079,6 +2172,7 @@ final class OverlayController {
         panel.orderFrontRegardless()
         if !wasVisible {
             startShortcutModifierMonitoring()
+            startRelativeTimeMonitoring()
             onVisibilityChanged?(true)
         }
     }
@@ -2088,7 +2182,51 @@ final class OverlayController {
         panel.orderOut(nil)
         if wasVisible {
             stopShortcutModifierMonitoring()
+            stopRelativeTimeMonitoring()
+            setTriggeringEventID(nil, animated: false)
             onVisibilityChanged?(false)
+        }
+    }
+
+    private func startRelativeTimeMonitoring() {
+        refreshRelativeTimes()
+        guard relativeTimeTimer == nil else { return }
+        let timer = Timer(timeInterval: 30, repeats: true) { [weak self] _ in
+            guard let self, !self.shortcutLettersVisible else { return }
+            self.refreshRelativeTimes()
+        }
+        timer.tolerance = 5
+        RunLoop.main.add(timer, forMode: .common)
+        relativeTimeTimer = timer
+    }
+
+    private func stopRelativeTimeMonitoring() {
+        relativeTimeTimer?.invalidate()
+        relativeTimeTimer = nil
+    }
+
+    private func refreshRelativeTimes() {
+        let timestamp = now()
+        rowsByEventID.values.forEach { $0.updateRelativeTime(now: timestamp) }
+    }
+
+    func refreshRelativeTimesForTesting() {
+        refreshRelativeTimes()
+    }
+
+    private func setTriggeringEventID(_ eventID: String?, animated: Bool = true) {
+        guard triggeringEventID != eventID else { return }
+        let previousEventID = triggeringEventID
+        triggeringEventID = eventID
+        if shortcutLettersVisible, panel.isVisible {
+            pendingRebuild = true
+            return
+        }
+        if let previousEventID {
+            rowsByEventID[previousEventID]?.setTriggered(false, animated: animated)
+        }
+        if let eventID {
+            rowsByEventID[eventID]?.setTriggered(true, animated: animated)
         }
     }
 
