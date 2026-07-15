@@ -1,6 +1,17 @@
 {
   "releases": [
     {
+      "version": "0.4.16",
+      "date": "2026-07-15",
+      "title": "Every host, every signal",
+      "changes": [
+        "Weekly usage now stays visible while loading and explains failures instead of silently disappearing.",
+        "Click an unavailable weekly-usage card to retry, including when Codex is installed in your personal Applications folder.",
+        "The host badge now counts this Mac and every configured remote, shows each host on hover, and opens Connections when clicked.",
+        "Removed the redundant active and completed totals from the notch header."
+      ]
+    },
+    {
       "version": "0.4.15",
       "date": "2026-07-15",
       "title": "Frozen where it belongs",
