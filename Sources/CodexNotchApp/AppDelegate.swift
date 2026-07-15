@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let notificationSounds = NotificationSoundPlayer()
     private let updater = UpdateCoordinator()
     private let usageMonitor = CodexUsageMonitor()
+    private let notchHoverMonitor = NotchHoverMonitor()
     private var inbox: CompletionInbox?
     private var listener: TailscaleListener?
     private var listenerAddress: String?
@@ -86,6 +87,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlay.update(activeTasks: activeStore.tasks, visible: activePreferences.isVisible)
         updater.start()
         usageMonitor.start()
+
+        notchHoverMonitor.onActivate = { [weak self] screen in
+            self?.usageMonitor.refresh()
+            self?.overlay.showFromNotchHover(on: screen)
+        }
+        notchHoverMonitor.start()
 
         hotKeys = GlobalHotKeys { [weak self] action in
             switch action {
@@ -172,6 +179,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         remoteHealthMonitor.stop()
         appServerObserver.stop()
         usageMonitor.stop()
+        notchHoverMonitor.stop()
         activeReaper?.invalidate()
         if let activePreferenceObserver { NotificationCenter.default.removeObserver(activePreferenceObserver) }
         if let wakeObserver {
