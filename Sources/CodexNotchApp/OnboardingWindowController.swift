@@ -233,6 +233,10 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         buildSettingsPage(.tasks)
     }
 
+    func selectTasksTabForTesting() {
+        settingsTabs.first(where: { $0.title == "Tasks" })?.performClick(nil)
+    }
+
     init(
         pairings: PairingStore,
         pairer: RemoteHostPairer,

@@ -1125,6 +1125,35 @@ final class CodexNotchTests: XCTestCase {
         }
     }
 
+    func testTasksTabTransitionPreservesSettingsWindowWidth() throws {
+        _ = NSApplication.shared
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pairings = PairingStore(fileURL: directory.appendingPathComponent("pairings.json"))
+        let pairer = RemoteHostPairer(store: pairings) { _ in }
+        let controller = OnboardingWindowController(
+            pairings: pairings,
+            pairer: pairer,
+            isHookInstalled: { true },
+            shouldReduceMotion: { false }
+        )
+        let window = try XCTUnwrap(controller.window)
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
+        let originalWidth = controller.settingsBoundsForTesting.width
+        XCTAssertGreaterThan(originalWidth, 700)
+
+        controller.selectTasksTabForTesting()
+        let transitionFinished = expectation(description: "Tasks tab transition finished")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            transitionFinished.fulfill()
+        }
+        wait(for: [transitionFinished], timeout: 1)
+
+        XCTAssertEqual(controller.settingsBoundsForTesting.width, originalWidth, accuracy: 0.5)
+        XCTAssertGreaterThan(controller.settingsBoundsForTesting.width, 700)
+    }
+
     func testSettingsDoNotDisturbTogglePersistsWithoutMacOSFocus() throws {
         _ = NSApplication.shared
         let directory = temporaryDirectory()
