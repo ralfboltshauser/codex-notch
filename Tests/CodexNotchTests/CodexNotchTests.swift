@@ -1096,6 +1096,35 @@ final class CodexNotchTests: XCTestCase {
         })
     }
 
+    func testSettingsThemeAndSoundChoicesReceiveVisibleFrames() throws {
+        _ = NSApplication.shared
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pairings = PairingStore(fileURL: directory.appendingPathComponent("pairings.json"))
+        let pairer = RemoteHostPairer(store: pairings) { _ in }
+        let controller = OnboardingWindowController(
+            pairings: pairings,
+            pairer: pairer,
+            isHookInstalled: { true }
+        )
+
+        XCTAssertEqual(controller.renderedThemeChoiceFramesForTesting.count, 6)
+        for frame in controller.renderedThemeChoiceFramesForTesting {
+            XCTAssertGreaterThan(frame.width, 100)
+            XCTAssertGreaterThan(frame.height, 60)
+            XCTAssertTrue(controller.settingsBoundsForTesting.intersects(frame))
+        }
+
+        controller.showSoundsForTesting()
+
+        XCTAssertEqual(controller.renderedSoundChoiceFramesForTesting.count, 7)
+        for frame in controller.renderedSoundChoiceFramesForTesting {
+            XCTAssertGreaterThan(frame.width, 100)
+            XCTAssertGreaterThan(frame.height, 40)
+            XCTAssertTrue(controller.settingsBoundsForTesting.intersects(frame))
+        }
+    }
+
     func testSettingsDoNotDisturbTogglePersistsWithoutMacOSFocus() throws {
         _ = NSApplication.shared
         let directory = temporaryDirectory()
