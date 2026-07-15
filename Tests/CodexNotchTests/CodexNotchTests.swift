@@ -790,10 +790,11 @@ final class CodexNotchTests: XCTestCase {
         XCTAssertEqual(overlay.bodyWidthForTesting, 820, accuracy: 0.5)
         XCTAssertEqual(
             overlay.bodyHeightForTesting,
-            overlay.notchHeightForTesting + 110,
+            92,
             accuracy: 0.5
         )
         XCTAssertGreaterThanOrEqual(overlay.notchWidthForTesting, 80)
+        XCTAssertEqual(try! XCTUnwrap(overlay.headerTopInsetForTesting), 0, accuracy: 0.5)
 
         let view = try! XCTUnwrap(overlay.contentViewForTesting)
         view.layoutSubtreeIfNeeded()
@@ -818,6 +819,22 @@ final class CodexNotchTests: XCTestCase {
         overlay.showForEvent()
         XCTAssertTrue(overlay.hasHideTimerForTesting)
         overlay.hide(immediately: true)
+    }
+
+    func testMenuBarHeaderReservesTheMeasuredHardwareNotch() {
+        let exclusion = try! XCTUnwrap(OverlayController.menuBarNotchExclusionForTesting(
+            notchWidth: 180,
+            centerOffset: 12,
+            hasHardwareNotch: true
+        ))
+
+        XCTAssertEqual(exclusion.lowerBound, -88, accuracy: 0.5)
+        XCTAssertEqual(exclusion.upperBound, 112, accuracy: 0.5)
+        XCTAssertNil(OverlayController.menuBarNotchExclusionForTesting(
+            notchWidth: 180,
+            centerOffset: 12,
+            hasHardwareNotch: false
+        ))
     }
 
     func testTaskBadgesShowNerdLettersOnlyWhileControlShiftAreHeld() {
@@ -1249,7 +1266,7 @@ final class CodexNotchTests: XCTestCase {
 
         XCTAssertTrue(overlay.isVisibleForTesting)
         XCTAssertTrue(overlay.isPinnedForTesting)
-        XCTAssertGreaterThan(overlay.bodyHeightForTesting, overlay.notchHeightForTesting + 100)
+        XCTAssertGreaterThan(overlay.bodyHeightForTesting, 140)
         XCTAssertTrue(overlay.hasEmptyStateForTesting)
         overlay.hide(immediately: true)
     }
@@ -1269,7 +1286,7 @@ final class CodexNotchTests: XCTestCase {
         overlay.update(activeTasks: [active], visible: true)
         XCTAssertTrue(overlay.hasContent)
         XCTAssertFalse(overlay.hasEmptyStateForTesting)
-        XCTAssertGreaterThan(overlay.bodyHeightForTesting, overlay.notchHeightForTesting + 110)
+        XCTAssertGreaterThan(overlay.bodyHeightForTesting, 110)
 
         overlay.update(activeTasks: [active], visible: false)
         XCTAssertFalse(overlay.hasContent)

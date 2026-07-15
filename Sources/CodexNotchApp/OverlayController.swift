@@ -215,6 +215,13 @@ final class HUDContentView: NSView {
         contentHost?.layer?.animation(forKey: "notchContent") != nil
     }
 
+    var headerTopInsetForTesting: CGFloat? {
+        guard let headerView else { return nil }
+        layoutSubtreeIfNeeded()
+        let frame = headerView.convert(headerView.bounds, to: self)
+        return bounds.maxY - frame.maxY
+    }
+
     func animateLaunch(selectedRow: TaskRowView?) {
         if let headerView {
             animate(
@@ -1174,10 +1181,14 @@ private struct IslandGeometry {
     let notchWidth: CGFloat
     let notchHeight: CGFloat
     let notchCenterOffset: CGFloat
+    let hasHardwareNotch: Bool
 }
 
 final class OverlayController {
     static let eventVisibilityDuration: TimeInterval = 5
+    private static let menuBarHeaderHeight: CGFloat = 36
+    private static let reclaimedTopPadding: CGFloat = 18
+    private static let hardwareNotchPadding: CGFloat = 10
 
     private enum Phase {
         case hidden
@@ -1267,6 +1278,18 @@ final class OverlayController {
     }
     var hasContentAnimationForTesting: Bool {
         rootView?.hasContentAnimationForTesting == true
+    }
+    var headerTopInsetForTesting: CGFloat? { rootView?.headerTopInsetForTesting }
+    static func menuBarNotchExclusionForTesting(
+        notchWidth: CGFloat,
+        centerOffset: CGFloat,
+        hasHardwareNotch: Bool
+    ) -> ClosedRange<CGFloat>? {
+        menuBarNotchExclusion(
+            notchWidth: notchWidth,
+            centerOffset: centerOffset,
+            hasHardwareNotch: hasHardwareNotch
+        )
     }
     var hasContent: Bool {
         !tasks.isEmpty
@@ -1790,7 +1813,7 @@ final class OverlayController {
         headerViews.append(contentsOf: [toggleHint, activeToggle, clear, update, settings])
         headerViews.forEach(header.addSubview)
         var headerConstraints = [
-            header.heightAnchor.constraint(equalToConstant: 36),
+            header.heightAnchor.constraint(equalToConstant: Self.menuBarHeaderHeight),
             codexIcon.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 13),
             codexIcon.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             codexIcon.widthAnchor.constraint(equalToConstant: 16),
@@ -1826,7 +1849,7 @@ final class OverlayController {
                 ),
                 statusBadge.centerYAnchor.constraint(equalTo: header.centerYAnchor),
                 clear.leadingAnchor.constraint(
-                    equalTo: statusBadge.trailingAnchor,
+                    greaterThanOrEqualTo: statusBadge.trailingAnchor,
                     constant: 8
                 ),
             ])
@@ -1837,6 +1860,31 @@ final class OverlayController {
                     constant: 12
                 )
             )
+        }
+        if let exclusion = Self.menuBarNotchExclusion(
+            notchWidth: geometry.notchWidth,
+            centerOffset: geometry.notchCenterOffset,
+            hasHardwareNotch: geometry.hasHardwareNotch
+        ) {
+            let notchGuide = NSLayoutGuide()
+            header.addLayoutGuide(notchGuide)
+            let notchCenter = (exclusion.lowerBound + exclusion.upperBound) / 2
+            let leftHeaderGroup: NSView = statusBadge.map { $0 as NSView } ?? count
+            headerConstraints.append(contentsOf: [
+                notchGuide.centerXAnchor.constraint(
+                    equalTo: header.centerXAnchor,
+                    constant: notchCenter
+                ),
+                notchGuide.widthAnchor.constraint(
+                    equalToConstant: exclusion.upperBound - exclusion.lowerBound
+                ),
+                leftHeaderGroup.trailingAnchor.constraint(
+                    lessThanOrEqualTo: notchGuide.leadingAnchor
+                ),
+                clear.leadingAnchor.constraint(
+                    greaterThanOrEqualTo: notchGuide.trailingAnchor
+                ),
+            ])
         }
         NSLayoutConstraint.activate(headerConstraints)
 
@@ -1929,7 +1977,6 @@ final class OverlayController {
         }
 
         root.addSubview(stack)
-        let contentTopInset = geometry.notchHeight + 18
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(
                 equalTo: root.leadingAnchor,
@@ -1939,7 +1986,7 @@ final class OverlayController {
                 equalTo: root.trailingAnchor,
                 constant: -(geometry.bodyInset + 7)
             ),
-            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: contentTopInset),
+            stack.topAnchor.constraint(equalTo: root.topAnchor),
             stack.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -8),
             header.widthAnchor.constraint(equalTo: stack.widthAnchor),
         ])
@@ -1958,7 +2005,10 @@ final class OverlayController {
             ? 168
             : 62 + CGFloat(completedTasks.count * 48 + activeHeight + completedSectionHeight)
         let weeklyLimitHeight: CGFloat = usageOverview == nil ? 0 : 66
-        let height = geometry.notchHeight + contentHeight + weeklyLimitHeight
+        // contentHeight historically included the 18-point gap below the hardware
+        // notch. The header now occupies the menu-bar band, so reclaim that gap
+        // while preserving every row's existing vertical rhythm.
+        let height = contentHeight + weeklyLimitHeight - Self.reclaimedTopPadding
         let size = NSSize(width: geometry.windowWidth, height: height)
         panel.contentMinSize = size
         panel.contentMaxSize = size
@@ -2085,9 +2135,10 @@ final class OverlayController {
         let rightArea = screen.auxiliaryTopRightArea
         var notchWidth: CGFloat = 128
         var centerOffset: CGFloat = 0
+        var hasHardwareNotch = false
         if let leftArea, let rightArea {
             let measuredGap = rightArea.minX - leftArea.maxX
-            let hasHardwareNotch = leftArea.width > 0
+            hasHardwareNotch = leftArea.width > 0
                 && rightArea.width > 0
                 && measuredGap >= 80
                 && measuredGap <= screen.frame.width * 0.35
@@ -2103,8 +2154,19 @@ final class OverlayController {
             bodyInset: bodyInset,
             notchWidth: notchWidth,
             notchHeight: notchHeight,
-            notchCenterOffset: centerOffset
+            notchCenterOffset: centerOffset,
+            hasHardwareNotch: hasHardwareNotch
         )
+    }
+
+    private static func menuBarNotchExclusion(
+        notchWidth: CGFloat,
+        centerOffset: CGFloat,
+        hasHardwareNotch: Bool
+    ) -> ClosedRange<CGFloat>? {
+        guard hasHardwareNotch else { return nil }
+        let halfWidth = notchWidth / 2 + hardwareNotchPadding
+        return (centerOffset - halfWidth)...(centerOffset + halfWidth)
     }
 
     private func screenUnderPointer() -> NSScreen {
