@@ -461,6 +461,11 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         updateThemePreviewVisibility()
     }
 
+    func presentConnections() {
+        selectedPage = .connections
+        present()
+    }
+
     func updateRemoteHealth(_ snapshot: RemoteHostHealthSnapshot) {
         remoteHealth = snapshot
         remoteSummaryLabel?.stringValue = snapshot.hosts.isEmpty

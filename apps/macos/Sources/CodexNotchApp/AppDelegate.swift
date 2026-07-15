@@ -66,6 +66,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlay.onDismiss = { [weak self] index in self?.dismissTask(at: index) }
         overlay.onClear = { [weak self] in self?.store.removeAll() }
         overlay.onSettings = { [weak self] in self?.showOnboarding() }
+        overlay.onConnections = { [weak self] in self?.showOnboarding(showConnections: true) }
         overlay.onToggleActiveTasks = { [weak self] in self?.toggleActiveTasks() }
         overlay.onUpdate = { [weak self] in
             self?.overlay.hide()
@@ -255,10 +256,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func showOnboarding() {
+    private func showOnboarding(showConnections: Bool = false) {
         if let onboarding {
             onboarding.updateRemoteHealth(remoteHealthMonitor.snapshot)
-            onboarding.present()
+            if showConnections {
+                onboarding.presentConnections()
+            } else {
+                onboarding.present()
+            }
             remoteHealthMonitor.refresh()
             return
         }
@@ -291,7 +296,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.uninstall(completion: completion)
         }
         onboarding?.updateRemoteHealth(remoteHealthMonitor.snapshot)
-        onboarding?.present()
+        if showConnections {
+            onboarding?.presentConnections()
+        } else {
+            onboarding?.present()
+        }
         remoteHealthMonitor.refresh()
     }
 

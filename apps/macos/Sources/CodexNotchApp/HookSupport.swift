@@ -48,6 +48,27 @@ struct CodexHookInstaller {
             .contains(where: isOwnedHandler)
     }
 
+    var isTrusted: Bool {
+        guard isInstalled,
+              let keys = try? stateKeys(in: hooksFile),
+              !keys.isEmpty else { return false }
+        let configFile = hooksFile.deletingLastPathComponent().appendingPathComponent("config.toml")
+        guard let contents = try? String(contentsOf: configFile, encoding: .utf8) else {
+            return false
+        }
+        return trustedStateKeys(in: contents, matching: keys) == keys
+    }
+
+    var localHostHealth: LocalHostHealth {
+        guard isInstalled else {
+            return .needsAttention(message: "Local completion hook is not installed")
+        }
+        guard isTrusted else {
+            return .needsAttention(message: "Local completion hook still needs trust")
+        }
+        return .working
+    }
+
     func install() throws {
         guard FileManager.default.isExecutableFile(atPath: executableURL.path) else {
             throw NSError(
@@ -97,20 +118,64 @@ struct CodexHookInstaller {
     private func ownedStateKeys() throws -> Set<String> {
         var keys = Set<String>()
         for file in [hooksFile, hooksFile.appendingPathExtension("bak")] {
-            guard FileManager.default.fileExists(atPath: file.path) else { continue }
-            let data = try Data(contentsOf: file)
-            guard containsOwnedMarker(data) else { continue }
-            let root = try readRoot(at: file)
-            guard let hooks = root["hooks"] as? [String: Any],
-                  let groups = hooks["Stop"] as? [[String: Any]] else { continue }
-            for (groupIndex, group) in groups.enumerated() {
-                guard let handlers = group["hooks"] as? [[String: Any]] else { continue }
-                for (handlerIndex, handler) in handlers.enumerated() where isOwnedHandler(handler) {
-                    keys.insert("\(hooksFile.path):stop:\(groupIndex):\(handlerIndex)")
-                }
+            keys.formUnion(try stateKeys(in: file))
+        }
+        return keys
+    }
+
+    private func stateKeys(in file: URL) throws -> Set<String> {
+        guard FileManager.default.fileExists(atPath: file.path) else { return [] }
+        let data = try Data(contentsOf: file)
+        guard containsOwnedMarker(data) else { return [] }
+        let root = try readRoot(at: file)
+        guard let hooks = root["hooks"] as? [String: Any],
+              let groups = hooks["Stop"] as? [[String: Any]] else { return [] }
+        var keys = Set<String>()
+        for (groupIndex, group) in groups.enumerated() {
+            guard let handlers = group["hooks"] as? [[String: Any]] else { continue }
+            for (handlerIndex, handler) in handlers.enumerated() where isOwnedHandler(handler) {
+                keys.insert("\(hooksFile.path):stop:\(groupIndex):\(handlerIndex)")
             }
         }
         return keys
+    }
+
+    private func trustedStateKeys(
+        in contents: String,
+        matching keys: Set<String>
+    ) -> Set<String> {
+        var currentKey: String?
+        var trusted = Set<String>()
+        for line in contents.split(separator: "\n", omittingEmptySubsequences: false) {
+            let trimmed = String(line).trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.hasPrefix("[") {
+                currentKey = hookStateKey(from: trimmed)
+            } else if let currentKey,
+                      keys.contains(currentKey),
+                      isTrustedHashLine(trimmed) {
+                trusted.insert(currentKey)
+            }
+        }
+        return trusted
+    }
+
+    private func hookStateKey(from header: String) -> String? {
+        let prefix = "[hooks.state."
+        guard header.hasPrefix(prefix), header.hasSuffix("]") else { return nil }
+        let start = header.index(header.startIndex, offsetBy: prefix.count)
+        let quoted = String(header[start..<header.index(before: header.endIndex)])
+        guard let data = quoted.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(String.self, from: data)
+    }
+
+    private func isTrustedHashLine(_ line: String) -> Bool {
+        let parts = line.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+        guard parts.count == 2,
+              String(parts[0]).trimmingCharacters(in: .whitespaces) == "trusted_hash" else {
+            return false
+        }
+        let value = String(parts[1]).trimmingCharacters(in: .whitespaces)
+        return value.count > 2 && value.first == "\"" && value.last == "\""
     }
 
     private func removeHookState(keys: Set<String>) throws {
