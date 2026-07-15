@@ -443,14 +443,14 @@ final class EmptyStateView: NSView {
         iconWell.addSubview(icon)
 
         let title = NSTextField(labelWithString: updateVersion == nil ? "All clear" : "Update ready")
-        title.font = .systemFont(ofSize: 13, weight: .medium)
+        title.font = theme.font(ofSize: 13, weight: .medium)
         title.textColor = theme.primaryText
         title.alignment = .center
 
         let detailText = updateVersion.map { "Codex Notch \($0) is ready to install." }
             ?? "Completed Codex tasks will appear here."
         let detail = NSTextField(labelWithString: detailText)
-        detail.font = .systemFont(ofSize: 11.5, weight: .regular)
+        detail.font = theme.font(ofSize: 11.5, weight: .regular)
         detail.textColor = theme.secondaryText
         detail.alignment = .center
 
@@ -582,7 +582,7 @@ final class TaskRowView: NSView {
         layer?.cornerCurve = .continuous
 
         let title = NSTextField(labelWithString: task.title)
-        title.font = .systemFont(ofSize: 14, weight: .medium)
+        title.font = theme.font(ofSize: 14, weight: .medium)
         title.textColor = theme.primaryText
         title.lineBreakMode = .byTruncatingTail
         title.maximumNumberOfLines = 1
@@ -590,7 +590,7 @@ final class TaskRowView: NSView {
         title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         let source = NSTextField(labelWithString: task.sourceLabel)
-        source.font = .systemFont(ofSize: 10.5, weight: .medium)
+        source.font = theme.font(ofSize: 10.5, weight: .medium)
         source.textColor = theme.secondaryText
         source.lineBreakMode = .byTruncatingTail
         source.translatesAutoresizingMaskIntoConstraints = false
@@ -908,7 +908,7 @@ final class WeeklyLimitView: NSView {
         icon.translatesAutoresizingMaskIntoConstraints = false
 
         let title = NSTextField(labelWithString: "Weekly limit")
-        title.font = .systemFont(ofSize: 11, weight: .medium)
+        title.font = theme.font(ofSize: 11, weight: .medium)
         title.textColor = theme.secondaryText
         title.translatesAutoresizingMaskIntoConstraints = false
 
@@ -927,7 +927,7 @@ final class WeeklyLimitView: NSView {
         percentage.translatesAutoresizingMaskIntoConstraints = false
 
         let reset = NSTextField(labelWithString: resetTextForTesting)
-        reset.font = .systemFont(ofSize: 10.5, weight: .regular)
+        reset.font = theme.font(ofSize: 10.5, weight: .regular)
         reset.textColor = theme.tertiaryText
         reset.alignment = .right
         reset.translatesAutoresizingMaskIntoConstraints = false
@@ -996,18 +996,18 @@ final class ActiveTaskRowView: NSView {
             color = theme.tertiaryText
         }
         let title = NSTextField(labelWithString: task.title)
-        title.font = .systemFont(ofSize: 14, weight: .medium)
+        title.font = theme.font(ofSize: 14, weight: .medium)
         title.textColor = theme.primaryText
         title.lineBreakMode = .byTruncatingTail
         title.translatesAutoresizingMaskIntoConstraints = false
         title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let source = NSTextField(labelWithString: task.sourceLabel)
-        source.font = .systemFont(ofSize: 10.5, weight: .medium)
+        source.font = theme.font(ofSize: 10.5, weight: .medium)
         source.textColor = theme.secondaryText
         source.lineBreakMode = .byTruncatingTail
         source.translatesAutoresizingMaskIntoConstraints = false
         let status = NSTextField(labelWithString: stateText)
-        status.font = .systemFont(ofSize: 10.5, weight: .semibold)
+        status.font = theme.font(ofSize: 10.5, weight: .semibold)
         status.textColor = color
         status.translatesAutoresizingMaskIntoConstraints = false
         [numberBadge, title, source, status].forEach(addSubview)
@@ -1558,7 +1558,7 @@ final class OverlayController {
         codexIcon.translatesAutoresizingMaskIntoConstraints = false
 
         let heading = NSTextField(labelWithString: "Codex")
-        heading.font = .systemFont(ofSize: 13, weight: .semibold)
+        heading.font = theme.font(ofSize: 13, weight: .semibold)
         heading.textColor = theme.primaryText
         heading.translatesAutoresizingMaskIntoConstraints = false
 
@@ -1575,7 +1575,7 @@ final class OverlayController {
             countText = "\(completedTasks.count) completed"
         }
         let count = NSTextField(labelWithString: countText)
-        count.font = .systemFont(ofSize: 11, weight: .medium)
+        count.font = theme.font(ofSize: 11, weight: .medium)
         count.textColor = theme.secondaryText
         count.translatesAutoresizingMaskIntoConstraints = false
 
@@ -1599,7 +1599,7 @@ final class OverlayController {
 
         let clear = ClosureButton { [weak self] in self?.clearTasks() }
         clear.title = "Clear"
-        clear.font = .systemFont(ofSize: 11, weight: .medium)
+        clear.font = theme.font(ofSize: 11, weight: .medium)
         clear.contentTintColor = theme.secondaryText
         clear.toolTip = "Dismiss all tasks"
         clear.alphaValue = 0
@@ -1709,7 +1709,7 @@ final class OverlayController {
         activeTaskRows.removeAll()
         if !displayedActiveTasks.isEmpty {
             let section = NSTextField(labelWithString: "ACTIVE")
-            section.font = .systemFont(ofSize: 9.5, weight: .bold)
+            section.font = theme.font(ofSize: 9.5, weight: .bold)
             section.textColor = theme.tertiaryText
             section.translatesAutoresizingMaskIntoConstraints = false
             let sectionHost = NSView()
@@ -1733,7 +1733,7 @@ final class OverlayController {
             }
             if activeTasks.count > displayedActiveTasks.count {
                 let remaining = NSTextField(labelWithString: "+ \(activeTasks.count - displayedActiveTasks.count) more active tasks")
-                remaining.font = .systemFont(ofSize: 10.5, weight: .medium)
+                remaining.font = theme.font(ofSize: 10.5, weight: .medium)
                 remaining.textColor = theme.secondaryText
                 remaining.alignment = .center
                 remaining.translatesAutoresizingMaskIntoConstraints = false
@@ -1745,7 +1745,7 @@ final class OverlayController {
 
         if !completedTasks.isEmpty && !displayedActiveTasks.isEmpty {
             let section = NSTextField(labelWithString: "COMPLETED")
-            section.font = .systemFont(ofSize: 9.5, weight: .bold)
+            section.font = theme.font(ofSize: 9.5, weight: .bold)
             section.textColor = theme.tertiaryText
             section.translatesAutoresizingMaskIntoConstraints = false
             section.heightAnchor.constraint(equalToConstant: 20).isActive = true

@@ -594,24 +594,20 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
             card.setSelected(palette.id == ThemeStore.shared.selectedID)
             card.onSelect = { [weak self] id in
                 ThemeStore.shared.select(id)
-                self?.themeCards.forEach {
-                    $0.setSelected($0.theme.id == ThemeStore.shared.selectedID)
-                }
+                self?.buildAppearance()
             }
             themeCards.append(card)
             return card
         }
-        let firstRow = themeCardRow(Array(cards[0..<3]))
-        let secondRow = themeCardRow(Array(cards[3..<6]))
-        let grid = NSStackView(views: [firstRow, secondRow])
+        let rows = stride(from: 0, to: cards.count, by: 3).map { start in
+            themeCardRow(Array(cards[start..<min(start + 3, cards.count)]))
+        }
+        let grid = NSStackView(views: rows)
         grid.orientation = .vertical
         grid.alignment = .leading
         grid.spacing = 10
         grid.distribution = .fillEqually
-        NSLayoutConstraint.activate([
-            firstRow.widthAnchor.constraint(equalTo: grid.widthAnchor),
-            secondRow.widthAnchor.constraint(equalTo: grid.widthAnchor),
-        ])
+        NSLayoutConstraint.activate(rows.map { $0.widthAnchor.constraint(equalTo: grid.widthAnchor) })
 
         let done = ClosureButton { [weak self] in self?.close() }
         done.title = "Done"
@@ -642,7 +638,9 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
             header.widthAnchor.constraint(equalTo: stack.widthAnchor),
             sectionHeader.widthAnchor.constraint(equalTo: stack.widthAnchor),
             grid.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            grid.heightAnchor.constraint(equalToConstant: 196),
+            grid.heightAnchor.constraint(
+                equalToConstant: CGFloat(rows.count * 93 + max(rows.count - 1, 0) * 10)
+            ),
             footer.widthAnchor.constraint(equalTo: stack.widthAnchor),
             checkForUpdates.widthAnchor.constraint(equalToConstant: 148),
             checkForUpdates.heightAnchor.constraint(equalToConstant: 40),
@@ -866,7 +864,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
         button.imagePosition = .imageLeading
         button.imageHugsTitle = true
-        button.font = .systemFont(ofSize: 11.5, weight: active ? .semibold : .medium)
+        button.font = theme.font(ofSize: 11.5, weight: active ? .semibold : .medium)
         button.contentTintColor = active ? theme.primaryText : theme.secondaryText
         button.layer?.backgroundColor = (active ? theme.hoverSurface : NSColor.clear).cgColor
         button.layer?.cornerRadius = 9
@@ -1390,7 +1388,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
 
     private func makeLabel(_ text: String, size: CGFloat, weight: NSFont.Weight, color: NSColor) -> NSTextField {
         let label = NSTextField(labelWithString: text)
-        label.font = .systemFont(ofSize: size, weight: weight)
+        label.font = ThemeStore.shared.activeTheme.font(ofSize: size, weight: weight)
         label.textColor = color
         return label
     }
@@ -1426,7 +1424,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
     private func stylePrimaryButton(_ button: ClosureButton) {
         let theme = ThemeStore.shared.activeTheme
         button.bezelStyle = .rounded
-        button.font = .systemFont(ofSize: 13, weight: .semibold)
+        button.font = theme.font(ofSize: 13, weight: .semibold)
         button.contentTintColor = .black
         button.wantsLayer = true
         button.layer?.backgroundColor = theme.accent.cgColor
@@ -1438,7 +1436,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
     private func styleSecondaryButton(_ button: ClosureButton) {
         let theme = ThemeStore.shared.activeTheme
         button.bezelStyle = .rounded
-        button.font = .systemFont(ofSize: 12.5, weight: .semibold)
+        button.font = theme.font(ofSize: 12.5, weight: .semibold)
         button.contentTintColor = theme.primaryText
         button.wantsLayer = true
         button.layer?.backgroundColor = theme.quietSurface.cgColor

@@ -91,9 +91,9 @@ final class NotchThemePreviewView: NSView {
         island.addSublayer(sampleRow)
         island.addSublayer(badge)
 
-        taskLabel.font = .systemFont(ofSize: 12.5, weight: .semibold)
+        taskLabel.font = ThemeStore.shared.activeTheme.font(ofSize: 12.5, weight: .semibold)
         taskLabel.translatesAutoresizingMaskIntoConstraints = false
-        sourceLabel.font = .systemFont(ofSize: 9.5, weight: .medium)
+        sourceLabel.font = ThemeStore.shared.activeTheme.font(ofSize: 9.5, weight: .medium)
         sourceLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(taskLabel)
         addSubview(sourceLabel)
@@ -194,6 +194,8 @@ final class NotchThemePreviewView: NSView {
         badge.backgroundColor = theme.accent.withAlphaComponent(0.18).cgColor
         taskLabel.textColor = theme.primaryText
         sourceLabel.textColor = theme.secondaryText
+        taskLabel.font = theme.font(ofSize: 12.5, weight: .semibold)
+        sourceLabel.font = theme.font(ofSize: 9.5, weight: .medium)
         CATransaction.commit()
     }
 
@@ -240,9 +242,9 @@ final class ThemeCardButton: NSButton {
         swatch.cornerRadius = 5
         layer?.addSublayer(swatch)
 
-        nameLabel.font = .systemFont(ofSize: 12.5, weight: .semibold)
+        nameLabel.font = theme.font(ofSize: 12.5, weight: .semibold)
         nameLabel.textColor = theme.primaryText
-        moodLabel.font = .systemFont(ofSize: 10.5, weight: .regular)
+        moodLabel.font = theme.font(ofSize: 10.5, weight: .regular)
         moodLabel.textColor = theme.secondaryText
         selectedIcon.contentTintColor = theme.accent
         [nameLabel, moodLabel, selectedIcon].forEach {
