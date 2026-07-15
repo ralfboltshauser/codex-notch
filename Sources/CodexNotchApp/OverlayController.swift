@@ -2110,7 +2110,7 @@ final class OverlayController {
         guard !visible else { return }
         lockedActiveTasks = nil
         lockedCompletedTasks = nil
-        if phase == .open, panel.isVisible {
+        if (phase == .open || phase == .opening), panel.isVisible {
             finishPendingRebuild(expanded: true)
             if !isPinned { scheduleHide(after: Self.eventVisibilityDuration) }
         }
