@@ -66,6 +66,16 @@ final class CodexNotchTests: XCTestCase {
         XCTAssertNil(CodexRateLimitParser.weeklyLimit(from: response))
     }
 
+    func testRateLimitParserDoesNotSilentlyTruncateAChangedPrecisionContract() {
+        let response = Data("""
+        {"id":2,"result":{"rateLimits":{
+          "limitId":"codex","primary":{"usedPercent":20.5,"windowDurationMins":10080}
+        }}}
+        """.utf8)
+
+        XCTAssertNil(CodexRateLimitParser.weeklyLimit(from: response))
+    }
+
     func testCodexExecutableCandidatesCoverMacAppAndUserCLIInstalls() {
         let paths = CodexExecutableLocator.candidates(
             homeDirectory: URL(fileURLWithPath: "/Users/ralf"),
@@ -106,6 +116,180 @@ final class CodexNotchTests: XCTestCase {
             try XCTUnwrap(CodexRateLimitParser.weeklyLimit(from: response)).remainingPercent,
             63
         )
+    }
+
+    func testUsageForecastWaitsForAnHourAndTwoPointChange() {
+        XCTAssertEqual(CodexUsageMonitor.refreshInterval, 15 * 60)
+        let now = Date(timeIntervalSince1970: 1_784_500_000)
+        let reset = now.addingTimeInterval(7 * 24 * 60 * 60)
+        let limit = CodexWeeklyLimit(remainingPercent: 50, resetsAt: reset)
+
+        let shortObservation = CodexUsageEstimator.overview(
+            limit: limit,
+            samples: [CodexUsageSample(
+                recordedAt: now.addingTimeInterval(-30 * 60),
+                remainingPercent: 53,
+                resetsAt: reset
+            )],
+            now: now
+        )
+        let quantizedObservation = CodexUsageEstimator.overview(
+            limit: limit,
+            samples: [CodexUsageSample(
+                recordedAt: now.addingTimeInterval(-2 * 60 * 60),
+                remainingPercent: 51,
+                resetsAt: reset
+            )],
+            now: now
+        )
+
+        guard case .learning = shortObservation.forecast else {
+            return XCTFail("A short observation must not produce an ETA")
+        }
+        guard case .learning = quantizedObservation.forecast else {
+            return XCTFail("A one-point change is within the source's integer uncertainty")
+        }
+    }
+
+    func testUsageForecastProjectsExhaustionFromMeaningfulRecentTrend() throws {
+        let now = Date(timeIntervalSince1970: 1_784_500_000)
+        let reset = now.addingTimeInterval(7 * 24 * 60 * 60)
+        let overview = CodexUsageEstimator.overview(
+            limit: CodexWeeklyLimit(remainingPercent: 20, resetsAt: reset),
+            samples: [CodexUsageSample(
+                recordedAt: now.addingTimeInterval(-4 * 60 * 60),
+                remainingPercent: 30,
+                resetsAt: reset
+            )],
+            now: now
+        )
+
+        guard case let .exhausts(estimatedAt, pacePerDay) = overview.forecast else {
+            return XCTFail("Expected an exhaustion forecast")
+        }
+        XCTAssertEqual(estimatedAt.timeIntervalSince(now), 8 * 60 * 60, accuracy: 0.1)
+        XCTAssertEqual(pacePerDay, 60, accuracy: 0.01)
+        XCTAssertEqual(overview.recentTrend?.usedPercent, 10)
+        XCTAssertEqual(overview.recentTrend?.observedFor, 4 * 60 * 60)
+    }
+
+    func testUsageForecastDistinguishesSafeAndUncertainResetCrossings() {
+        let now = Date(timeIntervalSince1970: 1_784_500_000)
+        let safeReset = now.addingTimeInterval(48 * 60 * 60)
+        let safe = CodexUsageEstimator.overview(
+            limit: CodexWeeklyLimit(remainingPercent: 80, resetsAt: safeReset),
+            samples: [CodexUsageSample(
+                recordedAt: now.addingTimeInterval(-4 * 60 * 60),
+                remainingPercent: 82,
+                resetsAt: safeReset
+            )],
+            now: now
+        )
+        guard case .lastsThroughReset = safe.forecast else {
+            return XCTFail("Even the fastest plausible pace lasts beyond the reset")
+        }
+
+        let uncertainReset = now.addingTimeInterval(24 * 60 * 60)
+        let uncertain = CodexUsageEstimator.overview(
+            limit: CodexWeeklyLimit(remainingPercent: 10, resetsAt: uncertainReset),
+            samples: [CodexUsageSample(
+                recordedAt: now.addingTimeInterval(-4 * 60 * 60),
+                remainingPercent: 12,
+                resetsAt: uncertainReset
+            )],
+            now: now
+        )
+        guard case .nearReset = uncertain.forecast else {
+            return XCTFail("A reset inside the integer uncertainty range must stay qualified")
+        }
+    }
+
+    func testUsageForecastReportsQuietAndRestartsAfterCapacityIncrease() {
+        let now = Date(timeIntervalSince1970: 1_784_500_000)
+        let reset = now.addingTimeInterval(7 * 24 * 60 * 60)
+        let quiet = CodexUsageEstimator.overview(
+            limit: CodexWeeklyLimit(remainingPercent: 80, resetsAt: reset),
+            samples: [CodexUsageSample(
+                recordedAt: now.addingTimeInterval(-4 * 60 * 60),
+                remainingPercent: 80,
+                resetsAt: reset
+            )],
+            now: now
+        )
+        guard case .quiet = quiet.forecast else {
+            return XCTFail("An unchanged multi-hour observation should report quiet usage")
+        }
+
+        let resetWithoutTimestampChange = CodexUsageEstimator.overview(
+            limit: CodexWeeklyLimit(remainingPercent: 80, resetsAt: reset),
+            samples: [
+                CodexUsageSample(
+                    recordedAt: now.addingTimeInterval(-4 * 60 * 60),
+                    remainingPercent: 70,
+                    resetsAt: reset
+                ),
+                CodexUsageSample(
+                    recordedAt: now.addingTimeInterval(-2 * 60 * 60),
+                    remainingPercent: 60,
+                    resetsAt: reset
+                ),
+            ],
+            now: now
+        )
+        guard case .learning = resetWithoutTimestampChange.forecast else {
+            return XCTFail("A capacity increase must discard the stale downward trend")
+        }
+    }
+
+    func testUsageHistoryPersistsChangesAndHourlyFlatCheckpoints() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("usage-history.json")
+        let reset = Date(timeIntervalSince1970: 1_785_000_000)
+        let start = Date(timeIntervalSince1970: 1_784_500_000)
+        let store = CodexUsageHistoryStore(fileURL: file)
+
+        try store.observe(CodexWeeklyLimit(remainingPercent: 90, resetsAt: reset), at: start)
+        let transient = try store.observe(
+            CodexWeeklyLimit(remainingPercent: 90, resetsAt: reset),
+            at: start.addingTimeInterval(15 * 60)
+        )
+        try store.observe(
+            CodexWeeklyLimit(remainingPercent: 89, resetsAt: reset),
+            at: start.addingTimeInterval(30 * 60)
+        )
+        try store.observe(
+            CodexWeeklyLimit(remainingPercent: 89, resetsAt: reset),
+            at: start.addingTimeInterval(91 * 60)
+        )
+
+        XCTAssertEqual(transient.count, 2, "Fresh checks feed the forecast without bloating disk history")
+        XCTAssertEqual(store.storedSamples.map(\.remainingPercent), [90, 89, 89])
+        XCTAssertEqual(CodexUsageHistoryStore(fileURL: file).storedSamples, store.storedSamples)
+        let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
+        XCTAssertEqual((attributes[.posixPermissions] as? NSNumber)?.intValue, 0o600)
+    }
+
+    func testUsageHistoryPrunesSamplesOutsideEightWeekRetention() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = CodexUsageHistoryStore(
+            fileURL: directory.appendingPathComponent("usage-history.json")
+        )
+        let start = Date(timeIntervalSince1970: 1_780_000_000)
+        let later = start.addingTimeInterval(CodexUsageHistoryStore.retentionInterval + 60)
+
+        try store.observe(
+            CodexWeeklyLimit(remainingPercent: 90, resetsAt: start.addingTimeInterval(86_400)),
+            at: start
+        )
+        try store.observe(
+            CodexWeeklyLimit(remainingPercent: 100, resetsAt: later.addingTimeInterval(86_400)),
+            at: later
+        )
+
+        XCTAssertEqual(store.storedSamples.count, 1)
+        XCTAssertEqual(store.storedSamples.first?.recordedAt, later)
     }
 
     func testEventIDMatchesRemoteImplementation() {
@@ -1023,9 +1207,13 @@ final class CodexNotchTests: XCTestCase {
     func testWeeklyLimitRemainsVisibleAlongsideActiveTaskSupport() {
         _ = NSApplication.shared
         let overlay = OverlayController()
-        overlay.setWeeklyLimit(CodexWeeklyLimit(
-            remainingPercent: 63,
-            resetsAt: Date(timeIntervalSince1970: 1_784_487_540)
+        overlay.setUsageOverview(CodexUsageOverview(
+            limit: CodexWeeklyLimit(
+                remainingPercent: 63,
+                resetsAt: Date(timeIntervalSince1970: 1_784_487_540)
+            ),
+            forecast: .lastsThroughReset(pacePercentPerDay: 8),
+            recentTrend: CodexUsageTrend(usedPercent: 4, observedFor: 6 * 60 * 60)
         ))
 
         XCTAssertTrue(overlay.hasContent)
@@ -1036,7 +1224,46 @@ final class CodexNotchTests: XCTestCase {
         XCTAssertTrue(
             overlay.weeklyLimitViewForTesting?.resetTextForTesting.hasPrefix("Resets ") == true
         )
+        XCTAssertEqual(
+            overlay.weeklyLimitViewForTesting?.forecastTextForTesting,
+            "At this pace · lasts through reset"
+        )
+        XCTAssertEqual(overlay.weeklyLimitViewForTesting?.trendTextForTesting, "4% used · 6h")
         overlay.hide(immediately: true)
+    }
+
+    func testWeeklyUsageViewKeepsForecastApproximateAndLayoutUnambiguous() {
+        _ = NSApplication.shared
+        let now = Date(timeIntervalSince1970: 1_784_500_000)
+        let view = WeeklyLimitView(
+            overview: CodexUsageOverview(
+                limit: CodexWeeklyLimit(
+                    remainingPercent: 20,
+                    resetsAt: now.addingTimeInterval(7 * 24 * 60 * 60)
+                ),
+                forecast: .exhausts(
+                    estimatedAt: now.addingTimeInterval(8 * 60 * 60),
+                    pacePercentPerDay: 60
+                ),
+                recentTrend: CodexUsageTrend(usedPercent: 10, observedFor: 4 * 60 * 60)
+            ),
+            theme: NotchTheme.all[0],
+            now: now
+        )
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 446, height: 64))
+        host.addSubview(view)
+        NSLayoutConstraint.activate([
+            view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            view.topAnchor.constraint(equalTo: host.topAnchor),
+        ])
+        host.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(view.forecastTextForTesting, "At this pace · ~8h left")
+        XCTAssertFalse(view.hasAmbiguousLayout)
+        XCTAssertTrue(view.subviews.allSatisfy { !$0.hasAmbiguousLayout })
+        XCTAssertEqual(view.frame.width, 446, accuracy: 0.1)
+        XCTAssertEqual(view.frame.height, 64, accuracy: 0.1)
     }
 
     func testOverlayReportsVisibleLifetimeForScopedShortcuts() {
@@ -1259,6 +1486,13 @@ final class CodexNotchTests: XCTestCase {
 
         controller.present()
         XCTAssertFalse(controller.hasEmbeddedThemePreviewForTesting)
+        XCTAssertEqual(controller.selectedSettingsTabTitleForTesting, "Connections")
+        XCTAssertFalse(overlay.isThemePreviewActiveForTesting)
+        XCTAssertFalse(overlay.isPinnedForTesting)
+        XCTAssertFalse(overlay.isVisibleForTesting)
+
+        controller.selectSettingsTabForTesting(titled: "Themes")
+        waitForMainQueue(seconds: 0.2)
         XCTAssertTrue(overlay.isThemePreviewActiveForTesting)
         XCTAssertTrue(overlay.isPinnedForTesting)
         XCTAssertTrue(overlay.isVisibleForTesting)

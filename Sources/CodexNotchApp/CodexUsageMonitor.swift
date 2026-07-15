@@ -46,7 +46,11 @@ enum CodexRateLimitParser {
 
     private static func integer(_ value: Any?) -> Int? {
         if let value = value as? Int { return value }
-        if let value = value as? NSNumber { return value.intValue }
+        if let value = value as? NSNumber {
+            let double = value.doubleValue
+            guard double.isFinite, double.rounded() == double else { return nil }
+            return value.intValue
+        }
         return nil
     }
 }
@@ -189,17 +193,25 @@ struct CodexAppServerClient {
 }
 
 final class CodexUsageMonitor {
-    static let refreshInterval: TimeInterval = 5 * 60
+    static let refreshInterval: TimeInterval = 15 * 60
 
-    var onChange: ((CodexWeeklyLimit?) -> Void)?
+    var onChange: ((CodexUsageOverview?) -> Void)?
 
     private let queue = DispatchQueue(label: "com.ralfbuilds.codex-notch.usage", qos: .utility)
     private let client: CodexAppServerClient
+    private let historyStore: CodexUsageHistoryStore
+    private let now: () -> Date
     private var timer: DispatchSourceTimer?
     private var isRefreshing = false
 
-    init(client: CodexAppServerClient = CodexAppServerClient()) {
+    init(
+        client: CodexAppServerClient = CodexAppServerClient(),
+        historyStore: CodexUsageHistoryStore = CodexUsageHistoryStore(),
+        now: @escaping () -> Date = Date.init
+    ) {
         self.client = client
+        self.historyStore = historyStore
+        self.now = now
     }
 
     func start() {
@@ -238,14 +250,21 @@ final class CodexUsageMonitor {
             guard let response = try? client.readRateLimits(executable: executable) else { continue }
             receivedResponse = true
             if let limit = CodexRateLimitParser.weeklyLimit(from: response) {
-                publish(limit)
+                let observedAt = now()
+                let samples = (try? historyStore.observe(limit, at: observedAt))
+                    ?? historyStore.currentWindowSamples(for: limit)
+                publish(CodexUsageEstimator.overview(
+                    limit: limit,
+                    samples: samples,
+                    now: observedAt
+                ))
                 return
             }
         }
         if receivedResponse { publish(nil) }
     }
 
-    private func publish(_ limit: CodexWeeklyLimit?) {
-        DispatchQueue.main.async { [weak self] in self?.onChange?(limit) }
+    private func publish(_ overview: CodexUsageOverview?) {
+        DispatchQueue.main.async { [weak self] in self?.onChange?(overview) }
     }
 }
