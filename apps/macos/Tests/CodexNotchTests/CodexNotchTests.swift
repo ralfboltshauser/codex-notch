@@ -1509,9 +1509,11 @@ final class CodexNotchTests: XCTestCase {
         XCTAssertTrue(overlay.hasEmptyStateForTesting)
     }
 
-    func testOverlayShowsAggregateRemoteHostHealth() {
+    func testOverlayShowsCompactAggregateHostHealth() {
         _ = NSApplication.shared
         let overlay = OverlayController(localHostHealth: { .working })
+        overlay.toggle()
+        let initialBadge = overlay.hostStatusButtonForTesting
         let checkedAt = Date(timeIntervalSince1970: 1_784_035_200)
         let host = RemoteHost(
             id: "host-1",
@@ -1526,16 +1528,18 @@ final class CodexNotchTests: XCTestCase {
             healthByHostID: [host.id: .working(checkedAt: checkedAt)]
         ))
 
+        XCTAssertTrue(overlay.hostStatusButtonForTesting === initialBadge)
         XCTAssertEqual(overlay.remoteStatusTextForTesting, "Host working")
-        overlay.toggle()
         XCTAssertTrue(overlay.isVisibleForTesting)
         XCTAssertEqual(overlay.hostStatusCountForTesting, "2")
-        XCTAssertEqual(overlay.hostStatusDetailForTesting, "hosts working")
+        XCTAssertEqual(overlay.hostStatusButtonForTesting?.title, "")
         XCTAssertTrue(overlay.hostStatusToolTipForTesting?.contains("This Mac: Working") == true)
         XCTAssertTrue(overlay.hostStatusToolTipForTesting?.contains("Ubuntu: Working") == true)
         XCTAssertTrue(overlay.hostStatusCountColorForTesting?.isEqual(
             NSColor(calibratedRed: 0.40, green: 0.91, blue: 0.71, alpha: 1)
         ) == true)
+        XCTAssertFalse(overlay.headerHasAmbiguousLayoutForTesting)
+        XCTAssertFalse(overlay.headerButtonTitlesForTesting.contains("Button"))
 
         var wasHiddenWhenConnectionsOpened = false
         overlay.onConnections = {
@@ -1546,20 +1550,25 @@ final class CodexNotchTests: XCTestCase {
         XCTAssertFalse(overlay.isVisibleForTesting)
     }
 
-    func testHostStatusBadgeShowsTheLocalHostWithoutAnyRemotes() {
+    func testHostStatusBadgeShowsOnlyTheLocalHostCountWithoutRemotes() {
         _ = NSApplication.shared
         let overlay = OverlayController(localHostHealth: { .working })
 
         overlay.toggle()
 
         XCTAssertEqual(overlay.hostStatusCountForTesting, "1")
-        XCTAssertEqual(overlay.hostStatusDetailForTesting, "host working")
+        XCTAssertEqual(overlay.hostStatusButtonForTesting?.title, "")
         XCTAssertTrue(overlay.hostStatusToolTipForTesting?.contains("This Mac: Working") == true)
         overlay.hide(immediately: true)
     }
 
-    func testWeeklyLimitRemainsVisibleAlongsideActiveTaskSupport() {
+    func testWeeklyLimitUsesCompactHeaderMetricWithoutGrowingTheBody() throws {
         _ = NSApplication.shared
+        let baseline = OverlayController()
+        baseline.toggle()
+        let baselineHeight = baseline.bodyHeightForTesting
+        baseline.hide(immediately: true)
+
         let overlay = OverlayController()
         overlay.setUsageOverview(CodexUsageOverview(
             limit: CodexWeeklyLimit(
@@ -1573,87 +1582,96 @@ final class CodexNotchTests: XCTestCase {
         XCTAssertTrue(overlay.hasContent)
         overlay.toggle()
 
-        XCTAssertTrue(overlay.isVisibleForTesting)
-        XCTAssertEqual(overlay.weeklyLimitViewForTesting?.percentageTextForTesting, "63% left")
+        XCTAssertEqual(overlay.weeklyUsageTextForTesting, "63%")
         XCTAssertTrue(
-            overlay.weeklyLimitViewForTesting?.resetTextForTesting.hasPrefix("Resets ") == true
+            overlay.weeklyUsageToolTipForTesting?.contains("Weekly usage: 63% remaining") == true
         )
-        XCTAssertEqual(
-            overlay.weeklyLimitViewForTesting?.forecastTextForTesting,
-            "At this pace · lasts through reset"
+        XCTAssertTrue(
+            overlay.weeklyUsageToolTipForTesting?.contains(
+                "At this pace: lasts through reset"
+            ) == true
         )
-        XCTAssertEqual(overlay.weeklyLimitViewForTesting?.trendTextForTesting, "4% used · 6h")
+        XCTAssertTrue(
+            overlay.weeklyUsageToolTipForTesting?.contains(
+                "Recent change: 4% used over 6h"
+            ) == true
+        )
+        XCTAssertEqual(overlay.weeklyUsageButtonForTesting?.title, "")
+        XCTAssertEqual(overlay.bodyHeightForTesting, baselineHeight, accuracy: 0.1)
+        let usageFrame = try XCTUnwrap(overlay.weeklyUsageFrameForTesting)
+        let hostFrame = try XCTUnwrap(overlay.hostStatusFrameForTesting)
+        XCTAssertLessThanOrEqual(usageFrame.maxX + 7, hostFrame.minX + 0.1)
+        XCTAssertFalse(overlay.headerHasAmbiguousLayoutForTesting)
+        XCTAssertFalse(overlay.headerButtonTitlesForTesting.contains("Button"))
         overlay.hide(immediately: true)
     }
 
-    func testWeeklyUsageSurfaceStaysVisibleWhenReadingUsageFailsAndRetries() {
+    func testWeeklyUsageHeaderKeepsFailuresVisibleAndRetriesInPlace() throws {
         _ = NSApplication.shared
         let overlay = OverlayController()
         overlay.setUsageState(.loading)
         overlay.toggle()
 
         XCTAssertTrue(overlay.hasContent)
-        XCTAssertEqual(
-            overlay.weeklyUsageStatusViewForTesting?.statusTextForTesting,
-            "Checking weekly usage…"
-        )
+        XCTAssertEqual(overlay.weeklyUsageTextForTesting, "…")
+        let initialButton = try XCTUnwrap(overlay.weeklyUsageButtonForTesting)
+        let initialHeight = overlay.bodyHeightForTesting
 
         overlay.setUsageState(.unavailable(message: "Codex app or CLI was not found"))
-        XCTAssertEqual(
-            overlay.weeklyUsageStatusViewForTesting?.statusTextForTesting,
-            "Weekly usage unavailable"
-        )
-        XCTAssertEqual(
-            overlay.weeklyUsageStatusViewForTesting?.detailTextForTesting,
-            "Click to retry"
-        )
+        XCTAssertTrue(overlay.weeklyUsageButtonForTesting === initialButton)
+        XCTAssertEqual(overlay.weeklyUsageTextForTesting, "—%")
         XCTAssertTrue(
-            overlay.weeklyUsageStatusViewForTesting?.toolTip?.contains(
+            overlay.weeklyUsageToolTipForTesting?.contains(
                 "Codex app or CLI was not found"
             ) == true
         )
+        XCTAssertEqual(overlay.weeklyUsageButtonForTesting?.title, "")
+        XCTAssertEqual(overlay.bodyHeightForTesting, initialHeight, accuracy: 0.1)
 
         var retried = false
         overlay.onRefreshUsage = { retried = true }
-        overlay.weeklyUsageStatusViewForTesting?.performClick(nil)
+        overlay.weeklyUsageButtonForTesting?.performClick(nil)
         XCTAssertTrue(retried)
+        XCTAssertFalse(overlay.headerHasAmbiguousLayoutForTesting)
         overlay.hide(immediately: true)
     }
 
-    func testWeeklyUsageViewKeepsForecastApproximateAndLayoutUnambiguous() {
+    func testWeeklyUsageHeaderKeepsForecastInItsTooltip() {
         _ = NSApplication.shared
         let now = Date(timeIntervalSince1970: 1_784_500_000)
-        let view = WeeklyLimitView(
-            overview: CodexUsageOverview(
-                limit: CodexWeeklyLimit(
-                    remainingPercent: 20,
-                    resetsAt: now.addingTimeInterval(7 * 24 * 60 * 60)
-                ),
-                forecast: .exhausts(
-                    estimatedAt: now.addingTimeInterval(8 * 60 * 60),
-                    pacePercentPerDay: 60
-                ),
-                recentTrend: CodexUsageTrend(usedPercent: 10, observedFor: 4 * 60 * 60)
+        let overview = CodexUsageOverview(
+            limit: CodexWeeklyLimit(
+                remainingPercent: 20,
+                resetsAt: now.addingTimeInterval(7 * 24 * 60 * 60)
             ),
-            theme: NotchTheme.all[0],
-            now: now
+            forecast: .exhausts(
+                estimatedAt: now.addingTimeInterval(8 * 60 * 60),
+                pacePercentPerDay: 60
+            ),
+            recentTrend: CodexUsageTrend(usedPercent: 10, observedFor: 4 * 60 * 60)
         )
-        let host = NSView(frame: NSRect(x: 0, y: 0, width: 446, height: 64))
+        let view = WeeklyUsageHeaderView(
+            state: .available(overview),
+            theme: NotchTheme.all[0],
+            refresh: {}
+        )
+        view.update(.available(overview), now: now)
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 90, height: 22))
         host.addSubview(view)
         NSLayoutConstraint.activate([
             view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
-            view.trailingAnchor.constraint(equalTo: host.trailingAnchor),
             view.topAnchor.constraint(equalTo: host.topAnchor),
         ])
         host.layoutSubtreeIfNeeded()
 
-        XCTAssertEqual(view.forecastTextForTesting, "At this pace · ~8h left")
+        XCTAssertEqual(view.valueTextForTesting, "20%")
+        XCTAssertTrue(view.toolTip?.contains("At this pace: ~8h remaining") == true)
+        XCTAssertTrue(view.toolTip?.contains("Recent change: 10% used over 4h") == true)
+        XCTAssertEqual(view.title, "")
         XCTAssertFalse(view.hasAmbiguousLayout)
         XCTAssertTrue(view.subviews.allSatisfy { !$0.hasAmbiguousLayout })
-        XCTAssertEqual(view.frame.width, 446, accuracy: 0.1)
-        XCTAssertEqual(view.frame.height, 64, accuracy: 0.1)
+        XCTAssertEqual(view.frame.height, 22, accuracy: 0.1)
     }
-
     func testOverlayReportsVisibleLifetimeForScopedShortcuts() {
         _ = NSApplication.shared
         let overlay = OverlayController()
