@@ -571,8 +571,13 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         let secondRow = themeCardRow(Array(cards[3..<6]))
         let grid = NSStackView(views: [firstRow, secondRow])
         grid.orientation = .vertical
+        grid.alignment = .leading
         grid.spacing = 10
         grid.distribution = .fillEqually
+        NSLayoutConstraint.activate([
+            firstRow.widthAnchor.constraint(equalTo: grid.widthAnchor),
+            secondRow.widthAnchor.constraint(equalTo: grid.widthAnchor),
+        ])
 
         let done = ClosureButton { [weak self] in self?.close() }
         done.title = "Done"
@@ -656,8 +661,13 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         let secondRow = soundCardRow(Array(audibleCards[3..<6]))
         let grid = NSStackView(views: [firstRow, secondRow])
         grid.orientation = .vertical
+        grid.alignment = .leading
         grid.spacing = 10
         grid.distribution = .fillEqually
+        NSLayoutConstraint.activate([
+            firstRow.widthAnchor.constraint(equalTo: grid.widthAnchor),
+            secondRow.widthAnchor.constraint(equalTo: grid.widthAnchor),
+        ])
 
         let silent = NotificationSoundCardButton(sound: .none, theme: theme)
         silent.translatesAutoresizingMaskIntoConstraints = false
@@ -739,6 +749,9 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         row.orientation = .horizontal
         row.spacing = 10
         row.distribution = .fillEqually
+        NSLayoutConstraint.activate(cards.map {
+            $0.heightAnchor.constraint(equalToConstant: 72)
+        })
         return row
     }
 
@@ -747,6 +760,9 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         row.orientation = .horizontal
         row.spacing = 10
         row.distribution = .fillEqually
+        NSLayoutConstraint.activate(cards.map {
+            $0.heightAnchor.constraint(equalToConstant: 93)
+        })
         return row
     }
 
