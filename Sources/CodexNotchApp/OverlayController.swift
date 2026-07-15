@@ -1197,6 +1197,8 @@ final class OverlayController {
     private var hideTimer: Timer?
     private var shortcutModifierTimer: Timer?
     private var shortcutLettersVisible = false
+    private var lockedActiveTasks: [ActiveTask]?
+    private var lockedCompletedTasks: [CompletedTask]?
     private var targetScreen: NSScreen?
     private var isPinned = false
     private var isThemePreviewActive = false
@@ -1214,6 +1216,7 @@ final class OverlayController {
     private weak var remoteStatusBadge: RemoteHostStatusBadgeView?
     private weak var emptyStateView: EmptyStateView?
     private weak var weeklyLimitView: WeeklyLimitView?
+    private weak var shortcutLockLabel: NSTextField?
     private weak var rootView: HUDContentView?
     private var rowsByEventID: [String: TaskRowView] = [:]
     private var activeTaskRows: [ActiveTaskRowView] = []
@@ -1250,6 +1253,11 @@ final class OverlayController {
     }
     var hasEmptyStateForTesting: Bool { emptyStateView != nil }
     var weeklyLimitViewForTesting: WeeklyLimitView? { weeklyLimitView }
+    var isShortcutOrderLockedForTesting: Bool { shortcutLettersVisible }
+    var shortcutLockTextForTesting: String? { shortcutLockLabel?.stringValue }
+    var shortcutTaskTitlesForTesting: [String] {
+        shortcutActiveTasks.map(\.title) + shortcutCompletedTasks.map(\.title)
+    }
     var taskBadgeTextsForTesting: [String] {
         activeTaskRows.map(\.badgeTextForTesting)
             + presentedTasks.compactMap { rowsByEventID[$0.eventID]?.badgeTextForTesting }
@@ -1273,6 +1281,12 @@ final class OverlayController {
     }
     private var displayedActiveTasks: [ActiveTask] {
         showsActiveTasks ? Array(activeTasks.prefix(4)) : []
+    }
+    private var shortcutActiveTasks: [ActiveTask] {
+        lockedActiveTasks ?? displayedActiveTasks
+    }
+    private var shortcutCompletedTasks: [CompletedTask] {
+        lockedCompletedTasks ?? presentedTasks
     }
 
     init(
@@ -1326,6 +1340,7 @@ final class OverlayController {
     }
 
     private func themeDidChange() {
+        if deferVisibleRebuildWhileShortcutsLocked() { return }
         switch phase {
         case .opening, .closing, .launching:
             pendingRebuild = true
@@ -1344,6 +1359,7 @@ final class OverlayController {
             .map(\.eventID)
             .filter { !previousEventIDs.contains($0) }
         self.tasks = tasks
+        if deferVisibleRebuildWhileShortcutsLocked() { return }
         switch phase {
         case .opening, .closing, .launching:
             pendingRebuild = true
@@ -1370,6 +1386,7 @@ final class OverlayController {
     func update(activeTasks: [ActiveTask], visible: Bool) {
         self.activeTasks = activeTasks
         showsActiveTasks = visible
+        if deferVisibleRebuildWhileShortcutsLocked() { return }
         switch phase {
         case .opening, .closing, .launching: pendingRebuild = true
         case .hidden: rebuildContent(initiallyExpanded: false)
@@ -1382,6 +1399,7 @@ final class OverlayController {
     func setUpdateAvailable(version: String?) {
         let wasAvailable = updateVersion != nil
         updateVersion = version
+        if deferVisibleRebuildWhileShortcutsLocked() { return }
         switch phase {
         case .opening, .closing, .launching:
             pendingRebuild = true
@@ -1398,6 +1416,7 @@ final class OverlayController {
     func setUsageOverview(_ overview: CodexUsageOverview?) {
         guard usageOverview != overview else { return }
         usageOverview = overview
+        if deferVisibleRebuildWhileShortcutsLocked() { return }
         switch phase {
         case .opening, .closing, .launching:
             pendingRebuild = true
@@ -1412,6 +1431,7 @@ final class OverlayController {
     func setRemoteHostHealth(_ snapshot: RemoteHostHealthSnapshot) {
         let previousIDs = remoteHealth.hosts.map(\.id)
         remoteHealth = snapshot
+        if deferVisibleRebuildWhileShortcutsLocked() { return }
         guard previousIDs != snapshot.hosts.map(\.id) else {
             remoteStatusBadge?.update(snapshot)
             return
@@ -1429,6 +1449,7 @@ final class OverlayController {
 
     func showForEvent() {
         guard automaticOpenAllowed(), hasContent else { return }
+        if shortcutLettersVisible, panel.isVisible { return }
         if phase == .hidden { targetScreen = screenUnderPointer() }
         if phase == .open || phase == .opening {
             if !isPinned { scheduleHide(after: Self.eventVisibilityDuration) }
@@ -1477,20 +1498,20 @@ final class OverlayController {
     }
 
     func openTask(at index: Int, animated: Bool = true) {
-        let active = displayedActiveTasks
+        let active = shortcutActiveTasks
         if active.indices.contains(index) {
             openActiveTask(active[index])
             return
         }
         let completedIndex = index - active.count
-        let completed = presentedTasks
+        let completed = shortcutCompletedTasks
         guard completed.indices.contains(completedIndex) else { return }
         openTask(completed[completedIndex], animated: animated)
     }
 
     func dismissTask(at index: Int, animated: Bool = true) {
-        let completedIndex = index - displayedActiveTasks.count
-        let visibleTasks = presentedTasks
+        let completedIndex = index - shortcutActiveTasks.count
+        let visibleTasks = shortcutCompletedTasks
         guard visibleTasks.indices.contains(completedIndex) else { return }
         let eventID = visibleTasks[completedIndex].eventID
         guard animated,
@@ -1702,8 +1723,12 @@ final class OverlayController {
 
         let toggleHint = NSTextField(labelWithString: GlobalHotKeys.toggleShortcutLabel())
         toggleHint.font = .monospacedSystemFont(ofSize: 10.5, weight: .medium)
-        toggleHint.textColor = theme.secondaryText
+        toggleHint.alignment = .center
+        toggleHint.wantsLayer = true
+        toggleHint.layer?.cornerRadius = 6
         toggleHint.translatesAutoresizingMaskIntoConstraints = false
+        updateShortcutLockLabel(toggleHint, locked: shortcutLettersVisible, theme: theme)
+        shortcutLockLabel = toggleHint
 
         let activeToggle = ClosureButton { [weak self] in self?.onToggleActiveTasks?() }
         activeToggle.image = NSImage(
@@ -1786,6 +1811,8 @@ final class OverlayController {
             toggleHint.leadingAnchor.constraint(equalTo: activeToggle.trailingAnchor, constant: 8),
             toggleHint.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -10),
             toggleHint.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            toggleHint.widthAnchor.constraint(equalToConstant: 56),
+            toggleHint.heightAnchor.constraint(equalToConstant: 20),
             settings.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             settings.widthAnchor.constraint(equalToConstant: 24),
             settings.heightAnchor.constraint(equalToConstant: 24),
@@ -1944,7 +1971,7 @@ final class OverlayController {
     }
 
     private func finishPendingRebuild(expanded: Bool) {
-        guard pendingRebuild else { return }
+        guard pendingRebuild, !shortcutLettersVisible else { return }
         rebuildContent(initiallyExpanded: expanded)
         if expanded { positionPanel() }
     }
@@ -1993,9 +2020,48 @@ final class OverlayController {
 
     private func setShortcutLettersVisible(_ visible: Bool) {
         guard shortcutLettersVisible != visible else { return }
+        if visible {
+            lockedActiveTasks = displayedActiveTasks
+            lockedCompletedTasks = presentedTasks
+            hideTimer?.invalidate()
+        }
         shortcutLettersVisible = visible
         activeTaskRows.forEach { $0.setShortcutLetterVisible(visible) }
         rowsByEventID.values.forEach { $0.setShortcutLetterVisible(visible) }
+        if let shortcutLockLabel {
+            updateShortcutLockLabel(
+                shortcutLockLabel,
+                locked: visible,
+                theme: ThemeStore.shared.activeTheme
+            )
+        }
+        guard !visible else { return }
+        lockedActiveTasks = nil
+        lockedCompletedTasks = nil
+        if phase == .open, panel.isVisible {
+            finishPendingRebuild(expanded: true)
+            if !isPinned { scheduleHide(after: Self.eventVisibilityDuration) }
+        }
+    }
+
+    private func updateShortcutLockLabel(
+        _ label: NSTextField,
+        locked: Bool,
+        theme: NotchTheme
+    ) {
+        label.stringValue = locked ? "LOCKED" : GlobalHotKeys.toggleShortcutLabel()
+        label.font = .monospacedSystemFont(ofSize: locked ? 9.5 : 10.5, weight: .semibold)
+        label.textColor = locked ? theme.accent : theme.secondaryText
+        label.layer?.backgroundColor = locked
+            ? theme.accent.withAlphaComponent(0.14).cgColor
+            : NSColor.clear.cgColor
+        label.toolTip = locked
+            ? "Task order is frozen until Control and Shift are released"
+            : "Show or hide Codex Notch"
+        label.setAccessibilityLabel(locked ? "Shortcut order locked" : "Toggle Codex Notch")
+        label.setAccessibilityValue(
+            locked ? "Task order is frozen" : GlobalHotKeys.toggleShortcutLabel()
+        )
     }
 
     private func screenFrame(_ row: TaskRowView) -> NSRect {
@@ -2049,6 +2115,7 @@ final class OverlayController {
     }
 
     private func screenParametersDidChange() {
+        if deferVisibleRebuildWhileShortcutsLocked() { return }
         let expanded = phase != .hidden && phase != .closing
         rebuildContent(initiallyExpanded: expanded)
         positionPanel()
@@ -2059,5 +2126,12 @@ final class OverlayController {
         hideTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
             self?.hide()
         }
+    }
+
+    @discardableResult
+    private func deferVisibleRebuildWhileShortcutsLocked() -> Bool {
+        guard shortcutLettersVisible, panel.isVisible else { return false }
+        pendingRebuild = true
+        return true
     }
 }

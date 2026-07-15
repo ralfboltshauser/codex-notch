@@ -101,8 +101,11 @@ These global shortcuts follow the Swiss German keyboard layout. Hold
 | `N`, `M` | Open tasks 9–10 |
 
 The existing number-key shortcuts remain available.
-While Control and Shift are held with the notch open, each completed-task number
+While Control and Shift are held with the notch open, each task number
 changes to its corresponding nerd-key letter and switches back on release.
+The visible task order and every shortcut target are frozen for the duration;
+the header shows `LOCKED`, and queued task, usage, update, and connection changes
+are applied only after both modifiers are released.
 While the notch is open, <kbd>Command</kbd>+<kbd>,</kbd> opens Settings. The
 shortcut is released back to the foreground app as soon as the notch closes.
 

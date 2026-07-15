@@ -855,6 +855,101 @@ final class CodexNotchTests: XCTestCase {
         overlay.hide(immediately: true)
     }
 
+    func testControlShiftLocksVisibleTaskOrderUntilReleased() {
+        _ = NSApplication.shared
+        var modifiersHeld = false
+        let first = CompletedTask(
+            eventID: String(repeating: "a", count: 64),
+            title: "First task",
+            url: URL(string: "codex://threads/\(threadID)")!,
+            receivedAt: Date()
+        )
+        let incoming = CompletedTask(
+            eventID: String(repeating: "b", count: 64),
+            title: "Incoming task",
+            url: URL(string: "codex://threads/019f5d4f-3a8d-76c0-8c2d-19451190e029")!,
+            receivedAt: Date().addingTimeInterval(1)
+        )
+        let initialActive = ActiveTask(
+            threadID: "019f5d4f-3a8d-76c0-8c2d-19451190e030",
+            title: "Initial active task",
+            sourceID: "local",
+            sourceLabel: "This Mac",
+            state: .running,
+            updatedAt: Date()
+        )
+        let incomingActive = ActiveTask(
+            threadID: "019f5d4f-3a8d-76c0-8c2d-19451190e031",
+            title: "Incoming active task",
+            sourceID: "local",
+            sourceLabel: "This Mac",
+            state: .waitingForInput,
+            updatedAt: Date().addingTimeInterval(1)
+        )
+        let overlay = OverlayController(
+            shouldReduceMotion: { true },
+            shortcutModifierState: { modifiersHeld }
+        )
+        overlay.update(tasks: [first])
+        overlay.update(activeTasks: [initialActive], visible: true)
+        overlay.toggle()
+
+        modifiersHeld = true
+        overlay.refreshShortcutModifierStateForTesting()
+        let lockedHeight = overlay.bodyHeightForTesting
+        XCTAssertTrue(overlay.isShortcutOrderLockedForTesting)
+        XCTAssertEqual(overlay.shortcutLockTextForTesting, "LOCKED")
+        XCTAssertEqual(
+            overlay.shortcutTaskTitlesForTesting,
+            ["Initial active task", "First task"]
+        )
+        XCTAssertEqual(overlay.taskBadgeTextsForTesting, ["J", "K"])
+
+        overlay.update(tasks: [incoming, first])
+        overlay.update(activeTasks: [incomingActive], visible: true)
+
+        XCTAssertEqual(overlay.bodyHeightForTesting, lockedHeight, accuracy: 0.5)
+        XCTAssertEqual(
+            overlay.shortcutTaskTitlesForTesting,
+            ["Initial active task", "First task"]
+        )
+        XCTAssertEqual(overlay.taskBadgeTextsForTesting, ["J", "K"])
+        var openedActiveTitle: String?
+        var openedTitle: String?
+        overlay.onOpenActive = { task in
+            openedActiveTitle = task.title
+            return false
+        }
+        overlay.onOpen = { task in
+            openedTitle = task.title
+            return false
+        }
+        overlay.openTask(at: 0, animated: false)
+        overlay.openTask(at: 1, animated: false)
+        XCTAssertEqual(openedActiveTitle, "Initial active task")
+        XCTAssertEqual(openedTitle, "First task")
+
+        modifiersHeld = false
+        overlay.refreshShortcutModifierStateForTesting()
+
+        XCTAssertFalse(overlay.isShortcutOrderLockedForTesting)
+        XCTAssertEqual(
+            overlay.shortcutLockTextForTesting,
+            GlobalHotKeys.toggleShortcutLabel()
+        )
+        XCTAssertEqual(
+            overlay.shortcutTaskTitlesForTesting,
+            ["Incoming active task", "Incoming task", "First task"]
+        )
+        XCTAssertEqual(overlay.taskBadgeTextsForTesting, ["1", "2", "3"])
+        XCTAssertGreaterThan(overlay.bodyHeightForTesting, lockedHeight)
+        overlay.openTask(at: 0, animated: false)
+        overlay.openTask(at: 1, animated: false)
+        XCTAssertEqual(openedActiveTitle, "Incoming active task")
+        XCTAssertEqual(openedTitle, "Incoming task")
+        overlay.hide(immediately: true)
+    }
+
     func testActiveAndCompletedTasksShareTheVisibleShortcutOrder() {
         _ = NSApplication.shared
         var modifiersHeld = false
