@@ -1152,8 +1152,18 @@ final class CodexNotchTests: XCTestCase {
             }
             wait(for: [transitionFinished], timeout: 1)
 
-            XCTAssertEqual(controller.settingsBoundsForTesting.width, expectedSize.width, accuracy: 0.5)
-            XCTAssertEqual(controller.settingsBoundsForTesting.height, expectedSize.height, accuracy: 0.5)
+            XCTAssertEqual(
+                controller.settingsBoundsForTesting.width,
+                expectedSize.width,
+                accuracy: 0.5,
+                "\(title) changed the settings width"
+            )
+            XCTAssertEqual(
+                controller.settingsBoundsForTesting.height,
+                expectedSize.height,
+                accuracy: 0.5,
+                "\(title) changed the settings height"
+            )
         }
     }
 

@@ -329,6 +329,8 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         content.wantsLayer = true
         root.addSubview(content)
         NSLayoutConstraint.activate([
+            root.widthAnchor.constraint(equalToConstant: Self.settingsContentSize.width),
+            root.heightAnchor.constraint(equalToConstant: Self.settingsContentSize.height),
             content.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 42),
             content.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -42),
             content.topAnchor.constraint(equalTo: root.topAnchor, constant: 40),
