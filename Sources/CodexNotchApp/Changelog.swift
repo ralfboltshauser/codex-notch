@@ -12,13 +12,40 @@ private struct ChangelogDocument: Decodable {
 }
 
 enum ChangelogCatalog {
+    static let resourceBundleName = "CodexNotch_CodexNotchApp.bundle"
+
     static let releases: [ChangelogRelease] = {
-        guard let url = Bundle.module.url(forResource: "Changelog", withExtension: "json"),
+        load(
+            applicationResourcesURL: Bundle.main.resourceURL,
+            fallbackBundle: {
+                guard Bundle.main.bundleURL.pathExtension.lowercased() != "app" else {
+                    return nil
+                }
+                return Bundle.module
+            }
+        )
+    }()
+
+    static func load(
+        applicationResourcesURL: URL?,
+        fallbackBundle: () -> Bundle?
+    ) -> [ChangelogRelease] {
+        let packagedURL = applicationResourcesURL?
+            .appendingPathComponent(resourceBundleName, isDirectory: true)
+            .appendingPathComponent("Changelog")
+            .appendingPathExtension("json")
+        let url: URL?
+        if let packagedURL, FileManager.default.fileExists(atPath: packagedURL.path) {
+            url = packagedURL
+        } else {
+            url = fallbackBundle()?.url(forResource: "Changelog", withExtension: "json")
+        }
+        guard let url,
               let data = try? Data(contentsOf: url),
               let releases = try? decode(data)
         else { return [] }
         return releases
-    }()
+    }
 
     static func decode(_ data: Data) throws -> [ChangelogRelease] {
         try JSONDecoder().decode(ChangelogDocument.self, from: data).releases

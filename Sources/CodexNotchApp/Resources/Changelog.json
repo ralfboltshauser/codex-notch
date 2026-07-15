@@ -1,6 +1,16 @@
 {
   "releases": [
     {
+      "version": "0.4.12",
+      "date": "2026-07-15",
+      "title": "A changelog that opens safely",
+      "changes": [
+        "Fixed the crash when opening Changelog in the signed app.",
+        "Added a packaged-app smoke check so a missing or misplaced changelog blocks future builds.",
+        "Pressing Control and Shift during a finished-task preview now keeps Codex Notch open."
+      ]
+    },
+    {
       "version": "0.4.11",
       "date": "2026-07-15",
       "title": "A changelog you can trust",

@@ -94,4 +94,5 @@ else
   codesign --force --timestamp --options runtime --sign "$IDENTITY" "$APP_DIR"
 fi
 codesign --verify --deep --strict --verbose=2 "$APP_DIR"
+"$APP_DIR/Contents/MacOS/CodexNotch" --validate-packaged-resources
 echo "$APP_DIR"
