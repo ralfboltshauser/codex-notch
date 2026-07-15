@@ -33,11 +33,12 @@ enum CodexRateLimitParser {
 
         var snapshots: [[String: Any]] = []
         if let byID = result["rateLimitsByLimitId"] as? [String: Any],
-           let codex = byID["codex"] as? [String: Any] {
+           let codex = byID["codex"] as? [String: Any],
+           isCodexAccountSnapshot(codex) {
             snapshots.append(codex)
         }
         if let historical = result["rateLimits"] as? [String: Any],
-           snapshots.isEmpty || historical["limitId"] as? String == "codex" {
+           isCodexAccountSnapshot(historical) {
             snapshots.append(historical)
         }
 
@@ -59,6 +60,14 @@ enum CodexRateLimitParser {
             }
         }
         return nil
+    }
+
+    private static func isCodexAccountSnapshot(_ snapshot: [String: Any]) -> Bool {
+        guard let limitID = snapshot["limitId"] as? String else {
+            // Older app-server responses did not identify the single account bucket.
+            return true
+        }
+        return limitID == "codex"
     }
 
     private static func integer(_ value: Any?) -> Int? {

@@ -949,24 +949,24 @@ final class WeeklyUsageHeaderView: ClosureButton {
             setAccessibilityValue(nil)
             setAccessibilityHelp(nil)
         case .loading:
-            valueLabel.stringValue = "…"
+            valueLabel.stringValue = "7d …"
             valueLabel.textColor = theme.tertiaryText
-            toolTip = "Checking weekly Codex usage."
+            toolTip = "Checking your seven-day Codex account limit."
             isHidden = false
-            setAccessibilityLabel("Checking weekly Codex usage")
+            setAccessibilityLabel("Checking weekly Codex account limit")
             setAccessibilityValue(nil)
             setAccessibilityHelp("Refresh weekly usage")
         case .unavailable(let message):
-            valueLabel.stringValue = "—%"
+            valueLabel.stringValue = "7d —%"
             valueLabel.textColor = .systemOrange
-            toolTip = "Weekly usage unavailable — \(message). Click to retry."
+            toolTip = "Weekly account limit unavailable — \(message). Click to retry."
             isHidden = false
-            setAccessibilityLabel("Weekly Codex usage unavailable")
+            setAccessibilityLabel("Weekly Codex account limit unavailable")
             setAccessibilityValue(message)
             setAccessibilityHelp("Retry reading weekly usage")
         case .available(let overview):
             let remaining = overview.limit.remainingPercent
-            valueLabel.stringValue = "\(remaining)%"
+            valueLabel.stringValue = "7d \(remaining)%"
             if remaining == 0 {
                 valueLabel.textColor = .systemRed
             } else if remaining <= 20 {
@@ -976,7 +976,7 @@ final class WeeklyUsageHeaderView: ClosureButton {
             }
             toolTip = Self.toolTip(for: overview, now: now)
             isHidden = false
-            setAccessibilityLabel("Weekly Codex usage")
+            setAccessibilityLabel("Weekly Codex account limit")
             setAccessibilityValue("\(remaining) percent remaining")
             setAccessibilityHelp("Refresh weekly usage")
         }
@@ -987,7 +987,8 @@ final class WeeklyUsageHeaderView: ClosureButton {
 
     private static func toolTip(for overview: CodexUsageOverview, now: Date) -> String {
         var lines = [
-            "Weekly usage: \(overview.limit.remainingPercent)% remaining",
+            "Weekly Codex limit: \(overview.limit.remainingPercent)% remaining",
+            "Account-wide · not this task's context",
             forecastText(overview.forecast, now: now),
         ]
         if let resetsAt = overview.limit.resetsAt {

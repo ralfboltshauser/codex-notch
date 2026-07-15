@@ -56,6 +56,43 @@ final class CodexNotchTests: XCTestCase {
         )
     }
 
+    func testRateLimitParserNeverTreatsAContextBucketAsTheWeeklyAccountLimit() {
+        let response = Data("""
+        {"id":2,"result":{
+          "rateLimits":{
+            "limitId":"context","limitName":"Current task context",
+            "primary":{"usedPercent":91,"windowDurationMins":10080,"resetsAt":1784600000}
+          },
+          "rateLimitsByLimitId":{
+            "context":{
+              "limitId":"context","limitName":"Current task context",
+              "primary":{"usedPercent":91,"windowDurationMins":10080,"resetsAt":1784600000}
+            }
+          }
+        }}
+        """.utf8)
+
+        XCTAssertNil(CodexRateLimitParser.weeklyLimit(from: response))
+    }
+
+    func testRateLimitParserSelectsAccountWeeklyLimitAlongsideContextData() throws {
+        let response = Data("""
+        {"id":2,"result":{
+          "contextWindow":{"remainingPercent":9},
+          "rateLimits":{"limitId":"context","primary":{"usedPercent":91,"windowDurationMins":10080}},
+          "rateLimitsByLimitId":{
+            "context":{"limitId":"context","primary":{"usedPercent":91,"windowDurationMins":10080}},
+            "codex":{"limitId":"codex","primary":{"usedPercent":12,"windowDurationMins":10080}}
+          }
+        }}
+        """.utf8)
+
+        XCTAssertEqual(
+            try XCTUnwrap(CodexRateLimitParser.weeklyLimit(from: response)).remainingPercent,
+            88
+        )
+    }
+
     func testRateLimitParserDoesNotMislabelShortWindowAsWeekly() {
         let response = Data("""
         {"id":2,"result":{"rateLimits":{
@@ -1582,9 +1619,16 @@ final class CodexNotchTests: XCTestCase {
         XCTAssertTrue(overlay.hasContent)
         overlay.toggle()
 
-        XCTAssertEqual(overlay.weeklyUsageTextForTesting, "63%")
+        XCTAssertEqual(overlay.weeklyUsageTextForTesting, "7d 63%")
         XCTAssertTrue(
-            overlay.weeklyUsageToolTipForTesting?.contains("Weekly usage: 63% remaining") == true
+            overlay.weeklyUsageToolTipForTesting?.contains(
+                "Weekly Codex limit: 63% remaining"
+            ) == true
+        )
+        XCTAssertTrue(
+            overlay.weeklyUsageToolTipForTesting?.contains(
+                "Account-wide · not this task's context"
+            ) == true
         )
         XCTAssertTrue(
             overlay.weeklyUsageToolTipForTesting?.contains(
@@ -1613,13 +1657,13 @@ final class CodexNotchTests: XCTestCase {
         overlay.toggle()
 
         XCTAssertTrue(overlay.hasContent)
-        XCTAssertEqual(overlay.weeklyUsageTextForTesting, "…")
+        XCTAssertEqual(overlay.weeklyUsageTextForTesting, "7d …")
         let initialButton = try XCTUnwrap(overlay.weeklyUsageButtonForTesting)
         let initialHeight = overlay.bodyHeightForTesting
 
         overlay.setUsageState(.unavailable(message: "Codex app or CLI was not found"))
         XCTAssertTrue(overlay.weeklyUsageButtonForTesting === initialButton)
-        XCTAssertEqual(overlay.weeklyUsageTextForTesting, "—%")
+        XCTAssertEqual(overlay.weeklyUsageTextForTesting, "7d —%")
         XCTAssertTrue(
             overlay.weeklyUsageToolTipForTesting?.contains(
                 "Codex app or CLI was not found"
@@ -1664,7 +1708,7 @@ final class CodexNotchTests: XCTestCase {
         ])
         host.layoutSubtreeIfNeeded()
 
-        XCTAssertEqual(view.valueTextForTesting, "20%")
+        XCTAssertEqual(view.valueTextForTesting, "7d 20%")
         XCTAssertTrue(view.toolTip?.contains("At this pace: ~8h remaining") == true)
         XCTAssertTrue(view.toolTip?.contains("Recent change: 10% used over 4h") == true)
         XCTAssertEqual(view.title, "")
