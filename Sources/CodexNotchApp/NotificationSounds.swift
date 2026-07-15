@@ -3,6 +3,8 @@ import Foundation
 import QuartzCore
 
 enum NotificationSound: String, CaseIterable, Equatable {
+    static let resourceBundleName = "CodexNotch_CodexNotchApp.bundle"
+
     case glassDrop = "glass-drop"
     case softPulse = "soft-pulse"
     case aurora
@@ -40,7 +42,33 @@ enum NotificationSound: String, CaseIterable, Equatable {
 
     var resourceURL: URL? {
         guard self != .none else { return nil }
-        return Bundle.module.url(
+        return resourceURL(
+            applicationResourcesURL: Bundle.main.resourceURL,
+            fallbackBundle: {
+                guard Bundle.main.bundleURL.pathExtension.lowercased() != "app" else {
+                    return nil
+                }
+                return Bundle.module
+            }
+        )
+    }
+
+    func resourceURL(
+        applicationResourcesURL: URL?,
+        fallbackBundle: () -> Bundle?
+    ) -> URL? {
+        guard self != .none else { return nil }
+        if let applicationResourcesURL {
+            let packagedURL = applicationResourcesURL
+                .appendingPathComponent(Self.resourceBundleName, isDirectory: true)
+                .appendingPathComponent("Sounds", isDirectory: true)
+                .appendingPathComponent(rawValue)
+                .appendingPathExtension("mp3")
+            if FileManager.default.fileExists(atPath: packagedURL.path) {
+                return packagedURL
+            }
+        }
+        return fallbackBundle()?.url(
             forResource: rawValue,
             withExtension: "mp3",
             subdirectory: "Sounds"

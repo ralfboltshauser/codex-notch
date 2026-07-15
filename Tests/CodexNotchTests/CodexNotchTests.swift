@@ -1272,6 +1272,52 @@ final class CodexNotchTests: XCTestCase {
         XCTAssertEqual(ThemeStore(defaults: defaults).selectedID, .aurora)
     }
 
+    func testNotificationSoundsResolveFromPackagedApplicationResourcesWithoutModuleFallback() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let resources = directory.appendingPathComponent("Contents/Resources", isDirectory: true)
+        let sounds = resources
+            .appendingPathComponent(NotificationSound.resourceBundleName, isDirectory: true)
+            .appendingPathComponent("Sounds", isDirectory: true)
+        try FileManager.default.createDirectory(at: sounds, withIntermediateDirectories: true)
+
+        for sound in NotificationSound.allCases where sound != .none {
+            let expectedURL = sounds
+                .appendingPathComponent(sound.rawValue)
+                .appendingPathExtension("mp3")
+            try Data([0x49, 0x44, 0x33]).write(to: expectedURL)
+            var usedFallback = false
+
+            let resolvedURL = sound.resourceURL(
+                applicationResourcesURL: resources,
+                fallbackBundle: {
+                    usedFallback = true
+                    return nil
+                }
+            )
+
+            XCTAssertEqual(resolvedURL, expectedURL)
+            XCTAssertFalse(usedFallback, "\(sound.name) unexpectedly evaluated Bundle.module")
+        }
+    }
+
+    func testMissingPackagedSoundFailsQuietlyWhenFallbackIsUnavailable() {
+        let missingResources = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: missingResources) }
+        var usedFallback = false
+
+        let resolvedURL = NotificationSound.glassDrop.resourceURL(
+            applicationResourcesURL: missingResources,
+            fallbackBundle: {
+                usedFallback = true
+                return nil
+            }
+        )
+
+        XCTAssertNil(resolvedURL)
+        XCTAssertTrue(usedFallback)
+    }
+
     func testTailscaleListenerReportsReadyBeforePairingContinues() throws {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
