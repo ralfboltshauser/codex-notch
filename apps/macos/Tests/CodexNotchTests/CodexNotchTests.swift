@@ -1619,15 +1619,16 @@ final class CodexNotchTests: XCTestCase {
         XCTAssertTrue(overlay.hasContent)
         overlay.toggle()
 
-        XCTAssertEqual(overlay.weeklyUsageTextForTesting, "7d 63%")
+        XCTAssertEqual(overlay.weeklyUsageTextForTesting, "63%")
+        XCTAssertTrue(overlay.weeklyUsageValueFitsForTesting)
         XCTAssertTrue(
             overlay.weeklyUsageToolTipForTesting?.contains(
-                "Weekly Codex limit: 63% remaining"
+                "You have 63% of your weekly Codex limit remaining."
             ) == true
         )
         XCTAssertTrue(
             overlay.weeklyUsageToolTipForTesting?.contains(
-                "Account-wide · not this task's context"
+                "Account-wide, not task context."
             ) == true
         )
         XCTAssertTrue(
@@ -1657,13 +1658,13 @@ final class CodexNotchTests: XCTestCase {
         overlay.toggle()
 
         XCTAssertTrue(overlay.hasContent)
-        XCTAssertEqual(overlay.weeklyUsageTextForTesting, "7d …")
+        XCTAssertEqual(overlay.weeklyUsageTextForTesting, "…")
         let initialButton = try XCTUnwrap(overlay.weeklyUsageButtonForTesting)
         let initialHeight = overlay.bodyHeightForTesting
 
         overlay.setUsageState(.unavailable(message: "Codex app or CLI was not found"))
         XCTAssertTrue(overlay.weeklyUsageButtonForTesting === initialButton)
-        XCTAssertEqual(overlay.weeklyUsageTextForTesting, "7d —%")
+        XCTAssertEqual(overlay.weeklyUsageTextForTesting, "—%")
         XCTAssertTrue(
             overlay.weeklyUsageToolTipForTesting?.contains(
                 "Codex app or CLI was not found"
@@ -1708,13 +1709,44 @@ final class CodexNotchTests: XCTestCase {
         ])
         host.layoutSubtreeIfNeeded()
 
-        XCTAssertEqual(view.valueTextForTesting, "7d 20%")
+        XCTAssertEqual(view.valueTextForTesting, "20%")
+        XCTAssertTrue(view.valueFitsWithoutTruncationForTesting)
         XCTAssertTrue(view.toolTip?.contains("At this pace: ~8h remaining") == true)
         XCTAssertTrue(view.toolTip?.contains("Recent change: 10% used over 4h") == true)
         XCTAssertEqual(view.title, "")
         XCTAssertFalse(view.hasAmbiguousLayout)
         XCTAssertTrue(view.subviews.allSatisfy { !$0.hasAmbiguousLayout })
         XCTAssertEqual(view.frame.height, 22, accuracy: 0.1)
+    }
+
+    func testWeeklyUsageHeaderFitsTheWidestPercentageInItsCompactWidth() {
+        _ = NSApplication.shared
+        let overview = CodexUsageOverview(
+            limit: CodexWeeklyLimit(remainingPercent: 100, resetsAt: nil),
+            forecast: .learning(observedFor: 0),
+            recentTrend: nil
+        )
+        let view = WeeklyUsageHeaderView(
+            state: .available(overview),
+            theme: NotchTheme.all[0],
+            refresh: {}
+        )
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 50, height: 22))
+        host.addSubview(view)
+        NSLayoutConstraint.activate([
+            view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            view.topAnchor.constraint(equalTo: host.topAnchor),
+            view.widthAnchor.constraint(equalTo: host.widthAnchor),
+        ])
+        host.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(view.valueTextForTesting, "100%")
+        XCTAssertGreaterThanOrEqual(
+            view.valueAllocatedWidthForTesting + 0.5,
+            view.valueIntrinsicWidthForTesting,
+            "allocated \(view.valueAllocatedWidthForTesting), intrinsic \(view.valueIntrinsicWidthForTesting)"
+        )
+        XCTAssertEqual(view.frame.width, 50, accuracy: 0.1)
     }
     func testOverlayReportsVisibleLifetimeForScopedShortcuts() {
         _ = NSApplication.shared
@@ -1909,8 +1941,8 @@ final class CodexNotchTests: XCTestCase {
 
     func testBundledChangelogMatchesReleaseAndRendersInSettings() throws {
         _ = NSApplication.shared
-        XCTAssertEqual(ChangelogCatalog.releases.first?.version, "0.4.18")
-        XCTAssertGreaterThanOrEqual(ChangelogCatalog.releases.count, 19)
+        XCTAssertEqual(ChangelogCatalog.releases.first?.version, "0.4.19")
+        XCTAssertGreaterThanOrEqual(ChangelogCatalog.releases.count, 20)
         XCTAssertTrue(ChangelogCatalog.releases.allSatisfy {
             !$0.title.isEmpty && !$0.changes.isEmpty
         })

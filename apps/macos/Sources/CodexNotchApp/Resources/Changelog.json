@@ -1,6 +1,15 @@
 {
   "releases": [
     {
+      "version": "0.4.19",
+      "date": "2026-07-15",
+      "title": "Your limit, at a glance",
+      "changes": [
+        "The weekly-limit badge now shows only the remaining percentage, keeping the value readable in the compact header.",
+        "Hovering the percentage now clearly explains that it is your account-wide weekly Codex limit, not task context."
+      ]
+    },
+    {
       "version": "0.4.18",
       "date": "2026-07-15",
       "title": "Your weekly limit, unmistakably",
