@@ -22,6 +22,7 @@ let package = Package(
             ],
             resources: [
                 .copy("Resources/Sounds"),
+                .copy("Resources/Changelog.json"),
             ],
             linkerSettings: [
                 .linkedFramework("Network"),

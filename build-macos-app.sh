@@ -42,6 +42,10 @@ for sound in glass-drop soft-pulse aurora pebble halo prism; do
     exit 1
   fi
 done
+if [ ! -s "$APP_DIR/Contents/Resources/$(basename "$RESOURCE_BUNDLE")/Changelog.json" ]; then
+  echo "Bundled changelog is missing" >&2
+  exit 1
+fi
 
 SPARKLE_FRAMEWORK=$(find "$SCRIPT_DIR/.build/artifacts" -type d \
   -path '*/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework' \

@@ -51,6 +51,7 @@ jobs:
             echo "Tag $GITHUB_REF_NAME does not match Info.plist version $PLIST_VERSION" >&2
             exit 1
           }
+          python3 changelog.py validate
 
       - name: Import Developer ID certificate
         env:
@@ -188,9 +189,10 @@ jobs:
         run: |
           set -eu
           VERSION=${GITHUB_REF_NAME#v}
+          python3 changelog.py markdown "$VERSION" > .build/release-notes.md
           gh release create "$GITHUB_REF_NAME" \
             ".build/release-assets/CodexNotch-$VERSION.zip" \
             ".build/release-assets/CodexNotch-$VERSION.zip.sha256" \
             ".build/release-assets/appcast.xml" \
-            --generate-notes \
+            --notes-file .build/release-notes.md \
             --title "Codex Notch $VERSION"

@@ -18,6 +18,8 @@ Run from the repository root. Read these files before changing anything:
 - `prepare-release.sh`
 - `build-macos-app.sh`
 - `AppResources/Info.plist`
+- `Sources/CodexNotchApp/Resources/Changelog.json`
+- `changelog.py`
 - `Package.swift`
 - `docs/update-pipeline.md`
 
@@ -60,6 +62,12 @@ Agree on the semantic version and intended change set. Derive the previous
 version from both Git tags and GitHub Releases; do not trust README examples.
 Require `MAJOR.MINOR.PATCH`, and increment `CFBundleVersion` monotonically.
 
+Before changing `Info.plist`, add a newest-first entry to
+`Sources/CodexNotchApp/Resources/Changelog.json` for the release. Every release
+must have its own entry. Write a short user-facing title and one to six specific
+changes that describe shipped behavior, not commit mechanics. Never silently
+rewrite a published entry; make factual corrections explicit.
+
 Audit what will ship:
 
 ```sh
@@ -94,6 +102,17 @@ PY
 
 Replace `0.0.0` with the selected version.
 
+Validate that the newest changelog entry matches the plist version and that the
+history is well-formed:
+
+```sh
+python3 changelog.py validate
+python3 changelog.py markdown VERSION
+```
+
+Treat a missing, generic, empty, duplicate, or mismatched changelog entry as a
+release blocker. The rendered Markdown is the GitHub Release body.
+
 ## Run the Ubuntu preflight
 
 Mirror the Linux CI job exactly, then add Swift parsing as an Ubuntu-only early
@@ -103,6 +122,7 @@ signal:
 python3 -m unittest discover -s Tests/LinuxHookTests -v
 for script in *.sh; do sh -n "$script"; done
 python3 -m py_compile remote/codex_notch_remote.py remote/codex_notch_live.py
+python3 changelog.py validate
 find Sources Tests -name '*.swift' -print0 | xargs -0 swiftc -frontend -parse
 git diff --check
 ```
@@ -174,6 +194,17 @@ test -z "$(git tag -l "vVERSION")"
 test -z "$(git ls-remote --tags origin "refs/tags/vVERSION")"
 ```
 
+Verify the changelog from that same commit:
+
+```sh
+DIR=$(mktemp -d)
+git show "$RELEASE_SHA":AppResources/Info.plist > "$DIR/Info.plist"
+git show "$RELEASE_SHA":Sources/CodexNotchApp/Resources/Changelog.json \
+  > "$DIR/Changelog.json"
+python3 changelog.py --plist "$DIR/Info.plist" \
+  --changelog "$DIR/Changelog.json" validate
+```
+
 Confirm `vVERSION` is absent locally and remotely. Immediately before publishing,
 summarize the version, `RELEASE_SHA`, merged PR, local checks, PR checks, main CI,
 and expected tag. Obtain explicit confirmation unless the current request already
@@ -222,7 +253,8 @@ curl -fsSIL https://github.com/ralfboltshauser/codex-notch/releases/latest/downl
 ```
 
 Report the release URL, tag, commit SHA, workflow URL, asset names, and checksum
-result. Do not say “released” merely because the tag exists.
+result. Confirm the GitHub Release body matches the bundled entry. Do not say
+“released” merely because the tag exists.
 
 ## Handle failures conservatively
 

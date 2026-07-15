@@ -24,6 +24,7 @@ BUILD=$((BUILD + 1))
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$PLIST"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD" "$PLIST"
 plutil -lint "$PLIST"
+python3 "$SCRIPT_DIR/changelog.py" validate
 
 echo "Prepared Codex Notch $VERSION (build $BUILD)."
 echo "Commit this change, then push tag v$VERSION to publish the signed update."

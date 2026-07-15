@@ -5,6 +5,10 @@ Codex Notch uses Sparkle 2.9.4 and GitHub Releases. A release contains:
 - `CodexNotch-VERSION.zip`, with the signed, notarized, and stapled app
 - `appcast.xml`, with signed feed metadata and the archive's Ed25519 signature
 
+Every release also adds a newest-first entry to
+`Sources/CodexNotchApp/Resources/Changelog.json`. That entry is bundled into the
+Settings changelog and rendered verbatim as the GitHub Release notes.
+
 The stable feed URL is:
 
 ```text
@@ -40,16 +44,23 @@ Store another encrypted copy outside this machine. Never commit the seed.
 
 ## Publish
 
-After merging the intended release commit to `main`:
+Before opening the release PR, write the new changelog entry and prepare the
+matching version:
 
 ```sh
+edit Sources/CodexNotchApp/Resources/Changelog.json
 ./prepare-release.sh 0.3.1
-git add AppResources/Info.plist
+python3 changelog.py markdown 0.3.1
+git add AppResources/Info.plist Sources/CodexNotchApp/Resources/Changelog.json
 git commit -m 'Prepare 0.3.1 release'
-git push origin main
-git tag v0.3.1
-git push origin v0.3.1
 ```
+
+`python3 changelog.py validate` rejects missing, duplicate, malformed, or
+out-of-order entries and requires the newest changelog version to match the app
+version. CI and the tag workflow both run this validation.
+
+After the release PR and the exact merged commit both pass CI, tag that verified
+merge commit and push the tag to publish it.
 
 The workflow rejects malformed versions, mismatches between the tag and
 `CFBundleShortVersionString`, and tags that do not point to a commit on `main`.
