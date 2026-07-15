@@ -84,10 +84,33 @@ final class CodexNotchTests: XCTestCase {
 
         XCTAssertTrue(paths.contains("/Applications/Codex.app/Contents/Resources/codex"))
         XCTAssertTrue(paths.contains("/Applications/ChatGPT.app/Contents/Resources/codex"))
+        XCTAssertTrue(paths.contains(
+            "/Users/ralf/Applications/Codex.app/Contents/Resources/codex"
+        ))
+        XCTAssertTrue(paths.contains(
+            "/Users/ralf/Applications/ChatGPT.app/Contents/Resources/codex"
+        ))
         XCTAssertTrue(paths.contains("/Users/ralf/.local/bin/codex"))
         XCTAssertTrue(paths.contains("/opt/homebrew/bin/codex"))
         XCTAssertTrue(paths.contains("/custom/bin/codex"))
         XCTAssertEqual(paths.filter { $0 == "/opt/homebrew/bin/codex" }.count, 1)
+    }
+
+    func testUsageMonitorReportsWhyUsageCannotLoadInsteadOfPublishingNothing() {
+        let monitor = CodexUsageMonitor(availableExecutables: { [] })
+        let unavailable = expectation(description: "Usage failure is visible")
+        var state: CodexUsageState?
+        monitor.onChange = { update in
+            guard case .unavailable = update else { return }
+            state = update
+            unavailable.fulfill()
+        }
+
+        monitor.refresh()
+        wait(for: [unavailable], timeout: 2)
+        monitor.stop()
+
+        XCTAssertEqual(state, .unavailable(message: "Codex app or CLI was not found"))
     }
 
     func testAppServerClientCompletesHandshakeWithoutClosingStandardInput() throws {
@@ -1563,6 +1586,40 @@ final class CodexNotchTests: XCTestCase {
         overlay.hide(immediately: true)
     }
 
+    func testWeeklyUsageSurfaceStaysVisibleWhenReadingUsageFailsAndRetries() {
+        _ = NSApplication.shared
+        let overlay = OverlayController()
+        overlay.setUsageState(.loading)
+        overlay.toggle()
+
+        XCTAssertTrue(overlay.hasContent)
+        XCTAssertEqual(
+            overlay.weeklyUsageStatusViewForTesting?.statusTextForTesting,
+            "Checking weekly usage…"
+        )
+
+        overlay.setUsageState(.unavailable(message: "Codex app or CLI was not found"))
+        XCTAssertEqual(
+            overlay.weeklyUsageStatusViewForTesting?.statusTextForTesting,
+            "Weekly usage unavailable"
+        )
+        XCTAssertEqual(
+            overlay.weeklyUsageStatusViewForTesting?.detailTextForTesting,
+            "Click to retry"
+        )
+        XCTAssertTrue(
+            overlay.weeklyUsageStatusViewForTesting?.toolTip?.contains(
+                "Codex app or CLI was not found"
+            ) == true
+        )
+
+        var retried = false
+        overlay.onRefreshUsage = { retried = true }
+        overlay.weeklyUsageStatusViewForTesting?.performClick(nil)
+        XCTAssertTrue(retried)
+        overlay.hide(immediately: true)
+    }
+
     func testWeeklyUsageViewKeepsForecastApproximateAndLayoutUnambiguous() {
         _ = NSApplication.shared
         let now = Date(timeIntervalSince1970: 1_784_500_000)
@@ -1790,8 +1847,8 @@ final class CodexNotchTests: XCTestCase {
 
     func testBundledChangelogMatchesReleaseAndRendersInSettings() throws {
         _ = NSApplication.shared
-        XCTAssertEqual(ChangelogCatalog.releases.first?.version, "0.4.15")
-        XCTAssertGreaterThanOrEqual(ChangelogCatalog.releases.count, 16)
+        XCTAssertEqual(ChangelogCatalog.releases.first?.version, "0.4.16")
+        XCTAssertGreaterThanOrEqual(ChangelogCatalog.releases.count, 17)
         XCTAssertTrue(ChangelogCatalog.releases.allSatisfy {
             !$0.title.isEmpty && !$0.changes.isEmpty
         })

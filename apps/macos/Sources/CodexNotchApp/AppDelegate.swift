@@ -76,9 +76,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updater.onAvailabilityChanged = { [weak self] version in
             self?.overlay.setUpdateAvailable(version: version)
         }
-        usageMonitor.onChange = { [weak self] overview in
-            self?.overlay.setUsageOverview(overview)
+        usageMonitor.onChange = { [weak self] state in
+            self?.overlay.setUsageState(state)
         }
+        overlay.onRefreshUsage = { [weak self] in self?.usageMonitor.refresh() }
         store.onChange = { [weak self] tasks in self?.overlay.update(tasks: tasks) }
         overlay.update(tasks: store.tasks)
         activeStore.onChange = { [weak self] tasks in

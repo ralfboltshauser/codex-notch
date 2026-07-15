@@ -1090,6 +1090,96 @@ final class WeeklyLimitView: NSView {
     }
 }
 
+final class WeeklyUsageStatusView: ClosureButton {
+    let statusTextForTesting: String
+    let detailTextForTesting: String
+
+    init(
+        state: CodexUsageState,
+        theme: NotchTheme,
+        retry: @escaping () -> Void
+    ) {
+        let iconName: String
+        let iconDescription: String
+        let iconColor: NSColor
+        let diagnostic: String?
+        switch state {
+        case .loading:
+            statusTextForTesting = "Checking weekly usage…"
+            detailTextForTesting = "Reading your Codex account"
+            iconName = "chart.line.uptrend.xyaxis"
+            iconDescription = "Checking Codex weekly usage"
+            iconColor = theme.accent
+            diagnostic = nil
+        case .unavailable(let message):
+            statusTextForTesting = "Weekly usage unavailable"
+            detailTextForTesting = "Click to retry"
+            iconName = "arrow.clockwise"
+            iconDescription = "Retry Codex weekly usage"
+            iconColor = .systemOrange
+            diagnostic = message
+        case .idle, .available:
+            fatalError("WeeklyUsageStatusView requires a loading or unavailable state")
+        }
+
+        super.init(handler: retry)
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        layer?.cornerRadius = 12
+        layer?.cornerCurve = .continuous
+        layer?.backgroundColor = theme.quietSurface.cgColor
+        layer?.borderColor = theme.border.cgColor
+        layer?.borderWidth = 1
+
+        let icon = NSImageView(image: NSImage(
+            systemSymbolName: iconName,
+            accessibilityDescription: iconDescription
+        ) ?? NSImage())
+        icon.contentTintColor = iconColor
+        icon.translatesAutoresizingMaskIntoConstraints = false
+
+        let title = NSTextField(labelWithString: "Weekly usage")
+        title.font = theme.font(ofSize: 11, weight: .medium)
+        title.textColor = theme.secondaryText
+        title.translatesAutoresizingMaskIntoConstraints = false
+
+        let status = NSTextField(labelWithString: statusTextForTesting)
+        status.font = theme.font(ofSize: 12, weight: .semibold)
+        status.textColor = theme.primaryText
+        status.translatesAutoresizingMaskIntoConstraints = false
+
+        let detail = NSTextField(labelWithString: detailTextForTesting)
+        detail.font = theme.font(ofSize: 10.5, weight: .regular)
+        detail.textColor = theme.tertiaryText
+        detail.translatesAutoresizingMaskIntoConstraints = false
+
+        [icon, title, status, detail].forEach(addSubview)
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 64),
+            icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 13),
+            icon.topAnchor.constraint(equalTo: topAnchor, constant: 10),
+            icon.widthAnchor.constraint(equalToConstant: 13),
+            icon.heightAnchor.constraint(equalToConstant: 13),
+            title.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 7),
+            title.centerYAnchor.constraint(equalTo: icon.centerYAnchor),
+            status.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 13),
+            status.topAnchor.constraint(equalTo: topAnchor, constant: 31),
+            detail.leadingAnchor.constraint(equalTo: status.trailingAnchor, constant: 9),
+            detail.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -13),
+            detail.centerYAnchor.constraint(equalTo: status.centerYAnchor),
+        ])
+
+        toolTip = diagnostic.map { "\($0). Click to retry." }
+            ?? "Codex Notch is checking your seven-day usage window."
+        setAccessibilityElement(true)
+        setAccessibilityLabel("Codex weekly usage")
+        setAccessibilityValue("\(statusTextForTesting). \(detailTextForTesting)")
+        setAccessibilityHelp("Retry reading Codex weekly usage")
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+}
+
 final class ActiveTaskRowView: NSView {
     let task: ActiveTask
     private let openHandler: () -> Void
@@ -1224,13 +1314,14 @@ final class OverlayController {
     private var phase: Phase = .hidden
     private var pendingRebuild = false
     private var updateVersion: String?
-    private var usageOverview: CodexUsageOverview?
+    private var usageState: CodexUsageState = .idle
     private var remoteHealth = RemoteHostHealthSnapshot.empty
     private weak var updateButton: ClosureButton?
     private weak var settingsButton: ClosureButton?
     private weak var hostStatusBadge: HostStatusBadgeView?
     private weak var emptyStateView: EmptyStateView?
     private weak var weeklyLimitView: WeeklyLimitView?
+    private weak var weeklyUsageStatusView: WeeklyUsageStatusView?
     private weak var shortcutHintLabel: NSTextField?
     private weak var activeSectionLabel: NSTextField?
     private weak var activeFreezeLabel: NSTextField?
@@ -1247,6 +1338,7 @@ final class OverlayController {
     var onClear: (() -> Void)?
     var onSettings: (() -> Void)?
     var onConnections: (() -> Void)?
+    var onRefreshUsage: (() -> Void)?
     var onToggleActiveTasks: (() -> Void)?
     var onUpdate: (() -> Void)?
     var onVisibilityChanged: ((Bool) -> Void)?
@@ -1277,6 +1369,9 @@ final class OverlayController {
     var hostStatusButtonForTesting: NSButton? { hostStatusBadge }
     var hasEmptyStateForTesting: Bool { emptyStateView != nil }
     var weeklyLimitViewForTesting: WeeklyLimitView? { weeklyLimitView }
+    var weeklyUsageStatusViewForTesting: WeeklyUsageStatusView? {
+        weeklyUsageStatusView
+    }
     var isShortcutOrderLockedForTesting: Bool { shortcutLettersVisible }
     var shortcutHintTextForTesting: String? { shortcutHintLabel?.stringValue }
     var activeFreezeTextForTesting: String? { activeFreezeLabel?.stringValue }
@@ -1321,7 +1416,7 @@ final class OverlayController {
         !tasks.isEmpty
             || (showsActiveTasks && !activeTasks.isEmpty)
             || updateVersion != nil
-            || usageOverview != nil
+            || usageState.isVisible
     }
     private var presentedTasks: [CompletedTask] {
         guard showsActiveTasks, !activeTasks.isEmpty else { return tasks }
@@ -1470,8 +1565,12 @@ final class OverlayController {
     }
 
     func setUsageOverview(_ overview: CodexUsageOverview?) {
-        guard usageOverview != overview else { return }
-        usageOverview = overview
+        setUsageState(overview.map(CodexUsageState.available) ?? .idle)
+    }
+
+    func setUsageState(_ state: CodexUsageState) {
+        guard usageState != state else { return }
+        usageState = state
         if deferVisibleRebuildWhileShortcutsLocked() { return }
         switch phase {
         case .opening, .closing, .launching:
@@ -1924,11 +2023,25 @@ final class OverlayController {
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.addArrangedSubview(header)
 
-        if let usageOverview {
+        weeklyLimitView = nil
+        weeklyUsageStatusView = nil
+        switch usageState {
+        case .available(let usageOverview):
             let limitView = WeeklyLimitView(overview: usageOverview, theme: theme)
             stack.addArrangedSubview(limitView)
             limitView.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
             weeklyLimitView = limitView
+        case .loading, .unavailable:
+            let statusView = WeeklyUsageStatusView(
+                state: usageState,
+                theme: theme,
+                retry: { [weak self] in self?.onRefreshUsage?() }
+            )
+            stack.addArrangedSubview(statusView)
+            statusView.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+            weeklyUsageStatusView = statusView
+        case .idle:
+            break
         }
 
         activeTaskRows.removeAll()
@@ -2049,7 +2162,7 @@ final class OverlayController {
         let contentHeight: CGFloat = completedTasks.isEmpty && displayedActiveTasks.isEmpty
             ? 168
             : 62 + CGFloat(completedTasks.count * 48 + activeHeight + completedSectionHeight)
-        let weeklyLimitHeight: CGFloat = usageOverview == nil ? 0 : 66
+        let weeklyLimitHeight: CGFloat = usageState.isVisible ? 66 : 0
         // contentHeight historically included the 18-point gap below the hardware
         // notch. The header now occupies the menu-bar band, so reclaim that gap
         // while preserving every row's existing vertical rhythm.
