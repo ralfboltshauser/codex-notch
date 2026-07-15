@@ -199,6 +199,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
     private var working = false
     private var contentTransitionID = 0
     private var selectedPage: SettingsPage = .appearance
+    private var themePreviewIsActive = false
     private var themeCards: [ThemeCardButton] = []
     private var soundCards: [NotificationSoundCardButton] = []
     private var settingsTabs: [SettingsNavigationButton] = []
@@ -207,6 +208,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
     var onRefreshConnections: (() -> Void)?
     var onCheckForUpdates: (() -> Void)?
     var onUninstall: ((@escaping (Result<Void, Error>) -> Void) -> Void)?
+    var onThemePreviewVisibilityChanged: ((Bool, NSScreen?) -> Void)?
 
     var checkForUpdatesButtonForTesting: NSButton? { checkForUpdatesButton }
     var doNotDisturbButtonForTesting: NSButton? { doNotDisturbButton }
@@ -224,6 +226,12 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
     var settingsBoundsForTesting: NSRect {
         root.layoutSubtreeIfNeeded()
         return root.bounds
+    }
+    var hasEmbeddedThemePreviewForTesting: Bool {
+        func containsPreview(_ view: NSView) -> Bool {
+            view is NotchThemePreviewView || view.subviews.contains(where: containsPreview)
+        }
+        return content.subviews.contains(where: containsPreview)
     }
 
     func showSoundsForTesting() {
@@ -281,6 +289,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     func windowWillClose(_ notification: Notification) {
+        setThemePreviewActive(false)
         ThemeStore.shared.endPreview()
         NSApp.setActivationPolicy(.accessory)
         NSApp.deactivate()
@@ -294,6 +303,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
+        updateThemePreviewVisibility()
     }
 
     func updateRemoteHealth(_ snapshot: RemoteHostHealthSnapshot) {
@@ -324,6 +334,18 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         }
     }
 
+    private func updateThemePreviewVisibility() {
+        setThemePreviewActive(
+            window?.isVisible == true && isHookInstalled() && selectedPage == .appearance
+        )
+    }
+
+    private func setThemePreviewActive(_ active: Bool) {
+        guard themePreviewIsActive != active else { return }
+        themePreviewIsActive = active
+        onThemePreviewVisibilityChanged?(active, window?.screen)
+    }
+
     private func installContentContainer() {
         content.translatesAutoresizingMaskIntoConstraints = false
         content.wantsLayer = true
@@ -348,6 +370,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
     private func buildSettingsPage(_ page: SettingsPage) {
         selectedPage = page
         ThemeStore.shared.endPreview()
+        updateThemePreviewVisibility()
         switch page {
         case .appearance: buildAppearance()
         case .tasks: buildTasks()
@@ -549,8 +572,6 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
             weight: .regular,
             color: theme.secondaryText
         )
-        let preview = NotchThemePreviewView()
-
         let sectionTitle = makeLabel(
             "THEMES",
             size: 10,
@@ -558,7 +579,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
             color: theme.tertiaryText
         )
         let hint = makeLabel(
-            "Hover to try one live · Click to keep it",
+            "Hover to preview in the notch · Click to keep it",
             size: 11,
             weight: .medium,
             color: theme.secondaryText
@@ -600,14 +621,16 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         footer.orientation = .horizontal
         footer.alignment = .centerY
         footer.spacing = 12
+        let footerSpacer = NSView()
 
-        let stack = NSStackView(views: [header, title, subtitle, preview, sectionHeader, grid, footer])
+        let stack = NSStackView(
+            views: [header, title, subtitle, sectionHeader, grid, footerSpacer, footer]
+        )
         configureStack(stack)
         stack.spacing = 0
         stack.setCustomSpacing(28, after: header)
         stack.setCustomSpacing(7, after: title)
-        stack.setCustomSpacing(20, after: subtitle)
-        stack.setCustomSpacing(20, after: preview)
+        stack.setCustomSpacing(28, after: subtitle)
         stack.setCustomSpacing(9, after: sectionHeader)
         stack.setCustomSpacing(18, after: grid)
         content.addSubview(stack)
@@ -615,9 +638,8 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
             stack.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             stack.trailingAnchor.constraint(equalTo: content.trailingAnchor),
             stack.topAnchor.constraint(equalTo: content.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: content.bottomAnchor),
             header.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            preview.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            preview.heightAnchor.constraint(equalToConstant: 142),
             sectionHeader.widthAnchor.constraint(equalTo: stack.widthAnchor),
             grid.widthAnchor.constraint(equalTo: stack.widthAnchor),
             grid.heightAnchor.constraint(equalToConstant: 196),
