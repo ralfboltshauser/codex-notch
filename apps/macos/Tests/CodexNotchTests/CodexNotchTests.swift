@@ -1731,7 +1731,7 @@ final class CodexNotchTests: XCTestCase {
             theme: NotchTheme.all[0],
             refresh: {}
         )
-        let host = NSView(frame: NSRect(x: 0, y: 0, width: 46, height: 22))
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 50, height: 22))
         host.addSubview(view)
         NSLayoutConstraint.activate([
             view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
@@ -1746,7 +1746,7 @@ final class CodexNotchTests: XCTestCase {
             view.valueIntrinsicWidthForTesting,
             "allocated \(view.valueAllocatedWidthForTesting), intrinsic \(view.valueIntrinsicWidthForTesting)"
         )
-        XCTAssertEqual(view.frame.width, 46, accuracy: 0.1)
+        XCTAssertEqual(view.frame.width, 50, accuracy: 0.1)
     }
     func testOverlayReportsVisibleLifetimeForScopedShortcuts() {
         _ = NSApplication.shared
