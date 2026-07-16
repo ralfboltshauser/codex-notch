@@ -1,6 +1,16 @@
 {
   "releases": [
     {
+      "version": "0.4.23",
+      "date": "2026-07-16",
+      "title": "Your weekly limit, actually live",
+      "changes": [
+        "Weekly usage now reads directly from the running Codex app-server connection, with executable discovery retained as a fallback.",
+        "Opening or refreshing Codex Notch no longer replaces a known percentage or useful failure message with indefinite loading dots.",
+        "Fallback checks now run without blocking live usage updates, share a bounded time budget, and avoid retrying the same executable through multiple symlinks."
+      ]
+    },
+    {
       "version": "0.4.22",
       "date": "2026-07-16",
       "title": "One task, then the whole picture",

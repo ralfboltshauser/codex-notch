@@ -118,8 +118,12 @@ struct CodexExecutableLocator {
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> [URL] {
-        candidates(homeDirectory: homeDirectory, environment: environment).filter {
-            fileManager.isExecutableFile(atPath: $0.path)
+        var seen: Set<String> = []
+        return candidates(homeDirectory: homeDirectory, environment: environment).compactMap {
+            let resolved = $0.resolvingSymlinksInPath().standardizedFileURL
+            guard fileManager.isExecutableFile(atPath: resolved.path),
+                  seen.insert(resolved.path).inserted else { return nil }
+            return resolved
         }
     }
 }
@@ -226,10 +230,16 @@ struct CodexAppServerClient {
 
 final class CodexUsageMonitor {
     static let refreshInterval: TimeInterval = 15 * 60
+    static let maximumFallbackDuration: TimeInterval = 12
 
     var onChange: ((CodexUsageState) -> Void)?
+    var onRefreshRequested: (() -> Void)?
 
     private let queue = DispatchQueue(label: "com.ralfbuilds.codex-notch.usage", qos: .utility)
+    private let workerQueue = DispatchQueue(
+        label: "com.ralfbuilds.codex-notch.usage-worker",
+        qos: .utility
+    )
     private let client: CodexAppServerClient
     private let historyStore: CodexUsageHistoryStore
     private let now: () -> Date
@@ -237,6 +247,11 @@ final class CodexUsageMonitor {
     private var timer: DispatchSourceTimer?
     private var isRefreshing = false
     private var lastOverview: CodexUsageOverview?
+
+    private enum RefreshResult {
+        case available(CodexWeeklyLimit)
+        case unavailable(String)
+    }
 
     init(
         client: CodexAppServerClient = CodexAppServerClient(),
@@ -256,13 +271,14 @@ final class CodexUsageMonitor {
         publish(.loading)
         queue.async { [weak self] in
             guard let self, self.timer == nil else { return }
+            self.beginRefresh()
             let timer = DispatchSource.makeTimerSource(queue: self.queue)
             timer.schedule(
-                deadline: .now(),
+                deadline: .now() + Self.refreshInterval,
                 repeating: Self.refreshInterval,
                 leeway: .seconds(15)
             )
-            timer.setEventHandler { [weak self] in self?.performRefresh() }
+            timer.setEventHandler { [weak self] in self?.beginRefresh() }
             self.timer = timer
             timer.resume()
         }
@@ -270,10 +286,13 @@ final class CodexUsageMonitor {
 
     func refresh() {
         queue.async { [weak self] in
-            guard let self else { return }
-            if self.lastOverview == nil { self.publish(.loading) }
-            self.performRefresh()
+            self?.beginRefresh()
         }
+    }
+
+    func acceptRateLimitResponse(_ response: Data) {
+        guard let limit = CodexRateLimitParser.weeklyLimit(from: response) else { return }
+        queue.async { [weak self] in self?.publish(limit) }
     }
 
     func stop() {
@@ -283,47 +302,67 @@ final class CodexUsageMonitor {
         }
     }
 
-    private func performRefresh() {
+    private func beginRefresh() {
         guard !isRefreshing else { return }
         isRefreshing = true
-        defer { isRefreshing = false }
+        DispatchQueue.main.async { [weak self] in self?.onRefreshRequested?() }
+        workerQueue.async { [weak self] in
+            guard let self else { return }
+            let result = self.fetchUsage()
+            self.queue.async { [weak self] in
+                guard let self else { return }
+                self.isRefreshing = false
+                switch result {
+                case .available(let limit): self.publish(limit)
+                case .unavailable(let message): self.publishUnavailable(message)
+                }
+            }
+        }
+    }
 
+    private func fetchUsage() -> RefreshResult {
         let executables = availableExecutables()
         guard !executables.isEmpty else {
-            publishUnavailable("Codex app or CLI was not found")
-            return
+            return .unavailable("Codex app or CLI was not found")
         }
 
         var errors: [String] = []
         var receivedResponse = false
+        let fallbackDeadline = Date().addingTimeInterval(Self.maximumFallbackDuration)
         for executable in executables {
+            let remainingTime = fallbackDeadline.timeIntervalSinceNow
+            guard remainingTime > 0 else { break }
             let response: Data
             do {
-                response = try client.readRateLimits(executable: executable)
+                var boundedClient = client
+                boundedClient.timeout = min(client.timeout, remainingTime)
+                response = try boundedClient.readRateLimits(executable: executable)
             } catch {
                 errors.append(error.localizedDescription)
                 continue
             }
             receivedResponse = true
             if let limit = CodexRateLimitParser.weeklyLimit(from: response) {
-                let observedAt = now()
-                let samples = (try? historyStore.observe(limit, at: observedAt))
-                    ?? historyStore.currentWindowSamples(for: limit)
-                let overview = CodexUsageEstimator.overview(
-                    limit: limit,
-                    samples: samples,
-                    now: observedAt
-                )
-                lastOverview = overview
-                publish(.available(overview))
-                return
+                return .available(limit)
             }
         }
         if receivedResponse {
-            publishUnavailable("Codex returned no seven-day usage window")
-        } else {
-            publishUnavailable(errors.first ?? "Codex usage could not be read")
+            return .unavailable("Codex returned no seven-day usage window")
         }
+        return .unavailable(errors.first ?? "Codex usage could not be read")
+    }
+
+    private func publish(_ limit: CodexWeeklyLimit) {
+        let observedAt = now()
+        let samples = (try? historyStore.observe(limit, at: observedAt))
+            ?? historyStore.currentWindowSamples(for: limit)
+        let overview = CodexUsageEstimator.overview(
+            limit: limit,
+            samples: samples,
+            now: observedAt
+        )
+        lastOverview = overview
+        publish(.available(overview))
     }
 
     private func publishUnavailable(_ message: String) {

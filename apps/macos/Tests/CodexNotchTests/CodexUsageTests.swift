@@ -128,6 +128,42 @@ final class CodexUsageTests: CodexNotchTestCase {
         XCTAssertEqual(paths.filter { $0 == "/opt/homebrew/bin/codex" }.count, 1)
     }
 
+    func testAvailableExecutablesDeduplicateSymlinksToTheSameCodexBinary() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let executable = directory.appendingPathComponent("real-codex")
+        try Data("#!/bin/sh\n".utf8).write(to: executable)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: executable.path
+        )
+        let firstBin = directory.appendingPathComponent("first/bin")
+        let secondBin = directory.appendingPathComponent("second/bin")
+        try FileManager.default.createDirectory(
+            at: firstBin,
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: secondBin,
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createSymbolicLink(
+            at: firstBin.appendingPathComponent("codex"),
+            withDestinationURL: executable
+        )
+        try FileManager.default.createSymbolicLink(
+            at: secondBin.appendingPathComponent("codex"),
+            withDestinationURL: executable
+        )
+
+        let available = CodexExecutableLocator.availableExecutables(
+            homeDirectory: directory,
+            environment: ["PATH": "\(firstBin.path):\(secondBin.path)"]
+        )
+
+        XCTAssertEqual(available.filter { $0 == executable }.count, 1)
+    }
+
     func testUsageMonitorReportsWhyUsageCannotLoadInsteadOfPublishingNothing() {
         let monitor = CodexUsageMonitor(availableExecutables: { [] })
         let unavailable = expectation(description: "Usage failure is visible")
@@ -143,6 +179,65 @@ final class CodexUsageTests: CodexNotchTestCase {
         monitor.stop()
 
         XCTAssertEqual(state, .unavailable(message: "Codex app or CLI was not found"))
+    }
+
+    func testRefreshKeepsFailureVisibleInsteadOfReturningToLoadingDots() {
+        let monitor = CodexUsageMonitor(availableExecutables: { [] })
+        var states: [CodexUsageState] = []
+        var unavailableCount = 0
+        let first = expectation(description: "First usage failure")
+        let second = expectation(description: "Second usage failure")
+        monitor.onChange = { state in
+            states.append(state)
+            guard case .unavailable = state else { return }
+            unavailableCount += 1
+            (unavailableCount == 1 ? first : second).fulfill()
+        }
+
+        monitor.refresh()
+        wait(for: [first], timeout: 2)
+        let secondRefreshStart = states.count
+        monitor.refresh()
+        wait(for: [second], timeout: 2)
+        monitor.stop()
+
+        XCTAssertFalse(states.dropFirst(secondRefreshStart).contains(.loading))
+    }
+
+    func testUsageMonitorReadsWeeklyLimitFromRunningAppServerSocket() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fakeClient = FakeAppServerSocketClient()
+        let observer = AppServerObserver(
+            socketCandidates: { ["/tmp/fake-codex.sock"] },
+            pathExists: { _ in true },
+            clientFactory: { _, _ in fakeClient }
+        )
+        let monitor = CodexUsageMonitor(
+            historyStore: CodexUsageHistoryStore(
+                fileURL: directory.appendingPathComponent("usage-history.json")
+            ),
+            availableExecutables: { [] }
+        )
+        monitor.onRefreshRequested = { observer.requestUsage() }
+        observer.onRateLimits = { monitor.acceptRateLimitResponse($0) }
+        let available = expectation(description: "Live app-server usage is available")
+        var remainingPercent: Int?
+        monitor.onChange = { state in
+            guard case .available(let overview) = state else { return }
+            guard remainingPercent == nil else { return }
+            remainingPercent = overview.limit.remainingPercent
+            available.fulfill()
+        }
+
+        observer.start()
+        monitor.refresh()
+        wait(for: [available], timeout: 2)
+        observer.stop()
+        monitor.stop()
+
+        XCTAssertEqual(remainingPercent, 63)
+        XCTAssertTrue(fakeClient.sentMethods.contains("account/rateLimits/read"))
     }
 
     func testAppServerClientCompletesHandshakeWithoutClosingStandardInput() throws {
@@ -346,4 +441,41 @@ final class CodexUsageTests: CodexNotchTestCase {
         XCTAssertEqual(store.storedSamples.count, 1)
         XCTAssertEqual(store.storedSamples.first?.recordedAt, later)
     }
+}
+
+private final class FakeAppServerSocketClient: AppServerSocketClient {
+    var onText: ((Data) -> Void)?
+    var onClose: (() -> Void)?
+
+    private let lock = NSLock()
+    private var messages: [[String: Any]] = []
+
+    var sentMethods: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return messages.compactMap { $0["method"] as? String }
+    }
+
+    func start() throws {}
+
+    func send(json: [String: Any]) throws {
+        lock.lock()
+        messages.append(json)
+        lock.unlock()
+
+        guard let method = json["method"] as? String else { return }
+        if method == "initialize" {
+            onText?(Data("{\"id\":1,\"result\":{}}".utf8))
+        } else if method == "account/rateLimits/read",
+                  let id = json["id"] as? Int {
+            onText?(Data("""
+            {"id":\(id),"result":{"rateLimits":{
+              "limitId":"codex",
+              "primary":{"usedPercent":37,"windowDurationMins":10080}
+            }}}
+            """.utf8))
+        }
+    }
+
+    func close() {}
 }

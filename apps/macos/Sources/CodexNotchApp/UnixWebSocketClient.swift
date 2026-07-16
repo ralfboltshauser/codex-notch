@@ -3,10 +3,19 @@ import Darwin
 import Foundation
 import Security
 
+protocol AppServerSocketClient: AnyObject {
+    var onText: ((Data) -> Void)? { get set }
+    var onClose: (() -> Void)? { get set }
+
+    func start() throws
+    func send(json: [String: Any]) throws
+    func close()
+}
+
 /// Minimal RFC 6455 client for Codex App Server's local Unix-domain socket.
 /// It deliberately supports text, ping/pong and close only; App Server JSON-RPC
 /// never needs extensions, compression or binary messages here.
-final class UnixWebSocketClient {
+final class UnixWebSocketClient: AppServerSocketClient {
     enum ClientError: Error { case socket, pathTooLong, handshake, closed, invalidFrame }
 
     private let path: String
