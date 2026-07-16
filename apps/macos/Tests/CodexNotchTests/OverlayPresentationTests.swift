@@ -33,14 +33,20 @@ final class OverlayPresentationTests: CodexNotchTestCase {
         overlay.toggle()
         XCTAssertTrue(overlay.isPinnedForTesting)
         XCTAssertFalse(overlay.hasHideTimerForTesting)
-        let expandedPath = try! XCTUnwrap((view.layer?.mask as? CAShapeLayer)?.path)
+        let expandedView = try! XCTUnwrap(overlay.contentViewForTesting)
+        expandedView.layoutSubtreeIfNeeded()
+        let expandedPath = try! XCTUnwrap(
+            (expandedView.layer?.mask as? CAShapeLayer)?.path
+        )
         let expandedBounds = expandedPath.boundingBoxOfPath
         XCTAssertEqual(expandedBounds.minX, 0, accuracy: 0.5)
-        XCTAssertEqual(expandedBounds.maxX, view.bounds.maxX, accuracy: 0.5)
-        XCTAssertGreaterThan(expandedBounds.maxY, view.bounds.maxY)
-        XCTAssertTrue(expandedPath.contains(CGPoint(x: view.bounds.midX, y: 1)))
+        XCTAssertEqual(expandedBounds.maxX, expandedView.bounds.maxX, accuracy: 0.5)
+        XCTAssertGreaterThan(expandedBounds.maxY, expandedView.bounds.maxY)
+        XCTAssertTrue(expandedPath.contains(CGPoint(x: expandedView.bounds.midX, y: 1)))
         XCTAssertFalse(expandedPath.contains(CGPoint(x: 1, y: 1)))
-        let expandedBodyInset = (view.bounds.width - overlay.bodyWidthForTesting) / 2
+        let expandedBodyInset = (
+            expandedView.bounds.width - overlay.bodyWidthForTesting
+        ) / 2
         XCTAssertTrue(expandedPath.contains(CGPoint(x: expandedBodyInset + 29, y: 1)))
         overlay.hide(immediately: true)
         overlay.showForEvent()
