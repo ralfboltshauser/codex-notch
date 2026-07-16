@@ -168,6 +168,9 @@ final class TaskRowView: NSView {
     var badgeTextForTesting: String { numberBadge.textForTesting }
     var relativeTimeTextForTesting: String { relativeTimeLabel.stringValue }
     var isTriggeredForTesting: Bool { isTriggered }
+    var hasPromotionAnimationForTesting: Bool {
+        layer?.animation(forKey: "rowPromotion") is CASpringAnimation
+    }
 
     override func mouseDown(with event: NSEvent) {
         isTrackingPress = true
@@ -287,6 +290,30 @@ final class TaskRowView: NSView {
         animation.duration = NotchMotion.rowArrivalDuration
         animation.timingFunction = NotchMotion.easeOut
         layer.add(animation, forKey: "rowReflow")
+    }
+
+    func animatePromotion(from oldFrame: NSRect, to newFrame: NSRect) {
+        guard let layer else { return }
+        let deltaX = oldFrame.midX - newFrame.midX
+        let deltaY = oldFrame.midY - newFrame.midY
+        guard abs(deltaX) > 0.5 || abs(deltaY) > 0.5 else { return }
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.transform = CATransform3DIdentity
+        CATransaction.commit()
+
+        layer.removeAnimation(forKey: "rowReflow")
+        layer.removeAnimation(forKey: "rowPromotion")
+        let spring = CASpringAnimation(keyPath: "transform")
+        spring.mass = NotchMotion.promotionMass
+        spring.stiffness = NotchMotion.promotionStiffness
+        spring.damping = NotchMotion.promotionDamping
+        spring.initialVelocity = 0
+        spring.fromValue = CATransform3DMakeTranslation(deltaX, deltaY, 0)
+        spring.toValue = CATransform3DIdentity
+        spring.duration = NotchMotion.promotionDuration
+        layer.add(spring, forKey: "rowPromotion")
     }
 
     func animateDismiss(delay: TimeInterval = 0, completion: (() -> Void)? = nil) {

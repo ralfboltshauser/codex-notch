@@ -79,7 +79,7 @@ final class OverlayPresentationTests: CodexNotchTestCase {
         )
     }
 
-    func testStopHookOpeningHighlightsOnlyItsTaskAndKeepsRelativeAgesFresh() {
+    func testStopHookOpeningShowsOnlyItsTaskAndKeepsRelativeAgeFresh() {
         _ = NSApplication.shared
         var now = Date(timeIntervalSince1970: 1_784_500_000)
         let newest = CompletedTask(
@@ -99,15 +99,19 @@ final class OverlayPresentationTests: CodexNotchTestCase {
 
         XCTAssertEqual(overlay.taskRelativeTimesForTesting, ["Just now", "3 min ago"])
         XCTAssertTrue(overlay.triggeredTaskEventIDsForTesting.isEmpty)
+        let fullHeight = overlay.bodyHeightForTesting
 
         overlay.showForEvent(triggeringEventID: triggering.eventID)
 
         XCTAssertTrue(overlay.isVisibleForTesting)
+        XCTAssertTrue(overlay.isTriggeredPresentationForTesting)
+        XCTAssertEqual(overlay.shortcutTaskTitlesForTesting, [triggering.title])
+        XCTAssertLessThan(overlay.bodyHeightForTesting, fullHeight)
         XCTAssertEqual(overlay.triggeredTaskEventIDsForTesting, [triggering.eventID])
 
         now.addTimeInterval(2 * 60)
         overlay.refreshRelativeTimesForTesting()
-        XCTAssertEqual(overlay.taskRelativeTimesForTesting, ["2 min ago", "5 min ago"])
+        XCTAssertEqual(overlay.taskRelativeTimesForTesting, ["5 min ago"])
 
         overlay.hide(immediately: true)
         XCTAssertTrue(overlay.triggeredTaskEventIDsForTesting.isEmpty)
@@ -116,6 +120,121 @@ final class OverlayPresentationTests: CodexNotchTestCase {
             overlay.triggeredTaskEventIDsForTesting.isEmpty,
             "A later manual opening must not reuse an old stop-hook highlight"
         )
+        overlay.hide(immediately: true)
+    }
+
+    func testShortcutPromotesTriggeredTaskToFullNotchWithCriticalSpring() {
+        _ = NSApplication.shared
+        let first = CompletedTask(
+            eventID: String(repeating: "8", count: 64),
+            title: "Newer completed task",
+            url: URL(string: "codex://threads/\(threadID)")!,
+            receivedAt: Date()
+        )
+        let triggering = CompletedTask(
+            eventID: String(repeating: "9", count: 64),
+            title: "Task that triggered the compact notch",
+            url: URL(string: "codex://threads/019f5d4f-3a8d-76c0-8c2d-19451190e029")!,
+            receivedAt: Date().addingTimeInterval(-60)
+        )
+        let overlay = OverlayController(shouldReduceMotion: { false })
+        overlay.update(tasks: [first, triggering])
+        overlay.showForEvent(triggeringEventID: triggering.eventID)
+        let compactHeight = overlay.bodyHeightForTesting
+
+        overlay.toggle()
+
+        XCTAssertFalse(overlay.isTriggeredPresentationForTesting)
+        XCTAssertTrue(overlay.isPinnedForTesting)
+        XCTAssertFalse(overlay.hasHideTimerForTesting)
+        XCTAssertEqual(
+            overlay.shortcutTaskTitlesForTesting,
+            [first.title, triggering.title]
+        )
+        XCTAssertGreaterThan(overlay.bodyHeightForTesting, compactHeight)
+        XCTAssertTrue(overlay.hasPromotionSpringForTesting)
+        XCTAssertEqual(
+            try! XCTUnwrap(overlay.promotionDampingRatioForTesting),
+            1,
+            accuracy: 0.001
+        )
+        XCTAssertTrue(overlay.triggeredRowHasPromotionAnimationForTesting)
+        overlay.hide(immediately: true)
+    }
+
+    func testHoverPromotesTriggeredTaskAndResumesAutoHideAfterExit() {
+        _ = NSApplication.shared
+        let triggering = CompletedTask(
+            eventID: String(repeating: "a", count: 64),
+            title: "Hover to see the full task list",
+            url: URL(string: "codex://threads/\(threadID)")!,
+            receivedAt: Date()
+        )
+        let other = CompletedTask(
+            eventID: String(repeating: "b", count: 64),
+            title: "Another completed task",
+            url: URL(string: "codex://threads/019f5d4f-3a8d-76c0-8c2d-19451190e029")!,
+            receivedAt: Date().addingTimeInterval(-60)
+        )
+        let overlay = OverlayController(shouldReduceMotion: { false })
+        overlay.update(tasks: [triggering, other])
+        overlay.showForEvent(triggeringEventID: triggering.eventID)
+
+        overlay.contentHoverChangedForTesting(true)
+
+        XCTAssertFalse(overlay.isTriggeredPresentationForTesting)
+        XCTAssertFalse(overlay.isPinnedForTesting)
+        XCTAssertFalse(overlay.hasHideTimerForTesting)
+        XCTAssertEqual(
+            overlay.shortcutTaskTitlesForTesting,
+            [triggering.title, other.title]
+        )
+        XCTAssertTrue(overlay.hasPromotionSpringForTesting)
+
+        overlay.contentHoverChangedForTesting(false)
+        XCTAssertTrue(overlay.hasHideTimerForTesting)
+        overlay.hide(immediately: true)
+    }
+
+    func testReducedMotionUsesFadeWhenPromotingTriggeredTask() {
+        _ = NSApplication.shared
+        let triggering = CompletedTask(
+            eventID: String(repeating: "c", count: 64),
+            title: "Reduced-motion trigger",
+            url: URL(string: "codex://threads/\(threadID)")!,
+            receivedAt: Date()
+        )
+        let overlay = OverlayController(shouldReduceMotion: { true })
+        overlay.update(tasks: [triggering])
+        overlay.showForEvent(triggeringEventID: triggering.eventID)
+
+        overlay.contentHoverChangedForTesting(true)
+
+        XCTAssertFalse(overlay.isTriggeredPresentationForTesting)
+        XCTAssertFalse(overlay.hasPromotionSpringForTesting)
+        XCTAssertTrue(overlay.hasContentAnimationForTesting)
+        overlay.hide(immediately: true)
+    }
+
+    func testShortcutCanInterruptAClosingTriggeredNotch() {
+        _ = NSApplication.shared
+        let triggering = CompletedTask(
+            eventID: String(repeating: "d", count: 64),
+            title: "Reopen while the compact notch is closing",
+            url: URL(string: "codex://threads/\(threadID)")!,
+            receivedAt: Date()
+        )
+        let overlay = OverlayController(shouldReduceMotion: { false })
+        overlay.update(tasks: [triggering])
+        overlay.showForEvent(triggeringEventID: triggering.eventID)
+        overlay.hide()
+
+        overlay.toggle()
+
+        XCTAssertTrue(overlay.isVisibleForTesting)
+        XCTAssertTrue(overlay.isPinnedForTesting)
+        XCTAssertFalse(overlay.isTriggeredPresentationForTesting)
+        XCTAssertTrue(overlay.hasPromotionSpringForTesting)
         overlay.hide(immediately: true)
     }
 
@@ -154,7 +273,7 @@ final class OverlayPresentationTests: CodexNotchTestCase {
     }
 
     func testMenuBarHeaderReservesTheMeasuredHardwareNotch() {
-        let exclusion = try! XCTUnwrap(OverlayController.menuBarNotchExclusionForTesting(
+        let exclusion = try! XCTUnwrap(OverlayGeometry.menuBarNotchExclusion(
             notchWidth: 180,
             centerOffset: 12,
             hasHardwareNotch: true
@@ -162,7 +281,7 @@ final class OverlayPresentationTests: CodexNotchTestCase {
 
         XCTAssertEqual(exclusion.lowerBound, -88, accuracy: 0.5)
         XCTAssertEqual(exclusion.upperBound, 112, accuracy: 0.5)
-        XCTAssertNil(OverlayController.menuBarNotchExclusionForTesting(
+        XCTAssertNil(OverlayGeometry.menuBarNotchExclusion(
             notchWidth: 180,
             centerOffset: 12,
             hasHardwareNotch: false

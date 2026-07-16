@@ -10,6 +10,49 @@ struct IslandGeometry {
     let hasHardwareNotch: Bool
 }
 
+enum OverlayPresentationScope: Equatable {
+    case full
+    case triggeredTask(eventID: String)
+
+    var triggeringEventID: String? {
+        guard case .triggeredTask(let eventID) = self else { return nil }
+        return eventID
+    }
+
+    func completedTasks(from tasks: [CompletedTask]) -> [CompletedTask] {
+        guard let triggeringEventID else { return tasks }
+        return tasks.filter { $0.eventID == triggeringEventID }
+    }
+}
+
+enum OverlayGeometry {
+    private static let hardwareNotchPadding: CGFloat = 10
+
+    static func island(for screen: NSScreen) -> IslandGeometry {
+        let notch = ScreenNotchGeometry(screen: screen)
+        let bodyInset: CGFloat = 34
+        let bodyWidth = min(820, max(460, screen.frame.width - 160))
+        return IslandGeometry(
+            windowWidth: bodyWidth + bodyInset * 2,
+            bodyInset: bodyInset,
+            notchWidth: notch.width,
+            notchHeight: notch.height,
+            notchCenterOffset: notch.centerOffset,
+            hasHardwareNotch: notch.hasHardwareNotch
+        )
+    }
+
+    static func menuBarNotchExclusion(
+        notchWidth: CGFloat,
+        centerOffset: CGFloat,
+        hasHardwareNotch: Bool
+    ) -> ClosedRange<CGFloat>? {
+        guard hasHardwareNotch else { return nil }
+        let halfWidth = notchWidth / 2 + hardwareNotchPadding
+        return (centerOffset - halfWidth)...(centerOffset + halfWidth)
+    }
+}
+
 enum NotchMotion {
     static let easeOut = CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1)
     static let ease = CAMediaTimingFunction(controlPoints: 0.25, 0.10, 0.25, 1)
@@ -22,6 +65,19 @@ enum NotchMotion {
     static let rowArrivalDuration: TimeInterval = 0.18
     static let rowDismissDuration: TimeInterval = 0.14
     static let reducedMotionFadeDuration: TimeInterval = 0.12
+    // A compact notification is promoted into the full notch like one physical
+    // surface. This is critically damped: responsive, interruptible, and with
+    // no decorative overshoot on a non-momentum interaction.
+    static let promotionResponse: CGFloat = 0.24
+    static let promotionDuration: TimeInterval = 0.29
+    static let promotionMass: CGFloat = 1
+    static let promotionStiffness: CGFloat = {
+        let angularFrequency = 2 * CGFloat.pi / promotionResponse
+        return angularFrequency * angularFrequency * promotionMass
+    }()
+    static let promotionDamping: CGFloat = 2 * sqrt(
+        promotionStiffness * promotionMass
+    )
 }
 
 enum CompletionRelativeTime {

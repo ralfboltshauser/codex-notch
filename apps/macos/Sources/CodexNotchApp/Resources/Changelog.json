@@ -1,6 +1,16 @@
 {
   "releases": [
     {
+      "version": "0.4.22",
+      "date": "2026-07-16",
+      "title": "One task, then the whole picture",
+      "changes": [
+        "Stop-hook openings now show only the task that caused Codex Notch to appear.",
+        "Hover over that compact notification or press Control–Shift–H to reveal the full task list without losing your place.",
+        "The compact notch now grows into the full view with a top-anchored, critically damped transition, with a gentle fade when Reduce Motion is enabled."
+      ]
+    },
+    {
       "version": "0.4.21",
       "date": "2026-07-15",
       "title": "Built to stay consistent",

@@ -19,6 +19,7 @@ final class HUDContentView: NSView {
     private weak var contentHost: NSView?
     private weak var headerView: NSView?
     private var taskRows: [TaskRowView] = []
+    private var promotionRevealViews: [NSView] = []
 
     init(theme: NotchTheme) {
         super.init(frame: .zero)
@@ -39,13 +40,20 @@ final class HUDContentView: NSView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func configureMotion(contentHost: NSView, header: NSView, rows: [TaskRowView]) {
+    func configureMotion(
+        contentHost: NSView,
+        header: NSView,
+        rows: [TaskRowView],
+        promotionRevealViews: [NSView]
+    ) {
         self.contentHost = contentHost
         headerView = header
         taskRows = rows
+        self.promotionRevealViews = promotionRevealViews
         contentHost.wantsLayer = true
         header.wantsLayer = true
         rows.forEach { $0.wantsLayer = true }
+        promotionRevealViews.forEach { $0.wantsLayer = true }
     }
 
     override func layout() {
@@ -102,6 +110,82 @@ final class HUDContentView: NSView {
         shapeMask.add(animation, forKey: "notchShape")
     }
 
+    var currentShapePathForPromotion: CGPath? {
+        shapeMask.presentation()?.path ?? shapeMask.path
+    }
+
+    func animatePromotion(
+        fromExpandedHeight compactHeight: CGFloat,
+        sourcePath: CGPath?
+    ) {
+        layoutSubtreeIfNeeded()
+        let visibleCompactHeight = min(
+            bounds.height,
+            max(notchHeight, compactHeight)
+        )
+        let compactRect = NSRect(
+            x: bounds.minX,
+            y: bounds.maxY - visibleCompactHeight,
+            width: bounds.width,
+            height: visibleCompactHeight
+        )
+        let fallbackStartPath = islandPath(in: compactRect, expansion: 1)
+        var translation = CGAffineTransform(
+            translationX: 0,
+            y: bounds.height - visibleCompactHeight
+        )
+        let startPath = sourcePath?.copy(using: &translation) ?? fallbackStartPath
+        let targetPath = islandPath(in: bounds, expansion: 1)
+        targetExpansion = 1
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        shapeMask.path = targetPath
+        CATransaction.commit()
+
+        shapeMask.removeAnimation(forKey: "notchShape")
+        shapeMask.removeAnimation(forKey: "notchPromotion")
+        let spring = CASpringAnimation(keyPath: "path")
+        spring.mass = NotchMotion.promotionMass
+        spring.stiffness = NotchMotion.promotionStiffness
+        spring.damping = NotchMotion.promotionDamping
+        spring.initialVelocity = 0
+        spring.fromValue = startPath
+        spring.toValue = targetPath
+        spring.duration = NotchMotion.promotionDuration
+        shapeMask.add(spring, forKey: "notchPromotion")
+
+        for (index, view) in promotionRevealViews.enumerated() {
+            animatePromotionReveal(
+                view,
+                delay: min(0.03 + Double(index) * 0.018, 0.10)
+            )
+        }
+    }
+
+    func prepareReducedMotionPromotion() {
+        setInitialState(expanded: true)
+        guard let layer = contentHost?.layer else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.opacity = 0
+        layer.transform = CATransform3DIdentity
+        CATransaction.commit()
+    }
+
+    func setControlsVisible(_ visible: Bool, animated: Bool) {
+        let target: CGFloat = visible ? 1 : 0
+        guard animated else {
+            controls.forEach { $0.alphaValue = target }
+            return
+        }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = visible ? 0.12 : 0.14
+            context.timingFunction = NotchMotion.ease
+            controls.forEach { $0.animator().alphaValue = target }
+        }
+    }
+
     func animateContentIn(duration: TimeInterval) {
         guard let contentHost else { return }
         animate(
@@ -144,6 +228,16 @@ final class HUDContentView: NSView {
 
     var hasContentAnimationForTesting: Bool {
         contentHost?.layer?.animation(forKey: "notchContent") != nil
+    }
+
+    var hasPromotionSpringForTesting: Bool {
+        shapeMask.animation(forKey: "notchPromotion") is CASpringAnimation
+    }
+
+    var promotionDampingRatioForTesting: CGFloat? {
+        guard let spring = shapeMask.animation(forKey: "notchPromotion")
+            as? CASpringAnimation else { return nil }
+        return spring.damping / (2 * sqrt(spring.stiffness * spring.mass))
     }
 
     var headerTopInsetForTesting: CGFloat? {
@@ -215,37 +309,60 @@ final class HUDContentView: NSView {
         layer.add(group, forKey: "notchContent")
     }
 
+    private func animatePromotionReveal(_ view: NSView, delay: TimeInterval) {
+        guard let layer = view.layer else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.opacity = 1
+        layer.transform = CATransform3DIdentity
+        CATransaction.commit()
+
+        layer.removeAnimation(forKey: "notchPromotionReveal")
+        let opacity = CABasicAnimation(keyPath: "opacity")
+        opacity.fromValue = 0
+        opacity.toValue = 1
+        let transform = CABasicAnimation(keyPath: "transform")
+        transform.fromValue = CATransform3DMakeTranslation(0, 5, 0)
+        transform.toValue = CATransform3DIdentity
+        let group = CAAnimationGroup()
+        group.animations = [opacity, transform]
+        group.beginTime = CACurrentMediaTime() + delay
+        group.duration = NotchMotion.rowArrivalDuration
+        group.fillMode = .backwards
+        group.timingFunction = NotchMotion.easeOut
+        layer.add(group, forKey: "notchPromotionReveal")
+    }
+
     private func islandPath(in rect: NSRect, expansion: CGFloat) -> CGPath {
         let progress = min(1, max(0, expansion))
         let width = rect.width
-        let height = rect.height
         // Keep the mathematical edge outside the clipped layer. An edge exactly
         // at maxY gets anti-aliased into a one-pixel seam on bright desktops.
-        let top = height + 2
+        let top = rect.maxY + 2
         let center = min(
-            width - notchWidth / 2 - 12,
-            max(notchWidth / 2 + 12, width / 2 + notchCenterOffset)
+            rect.maxX - notchWidth / 2 - 12,
+            max(rect.minX + notchWidth / 2 + 12, rect.midX + notchCenterOffset)
         )
         let neckHalfWidth = min(notchWidth / 2, width / 2 - 20)
         let neckLeft = center - neckHalfWidth
         let neckRight = center + neckHalfWidth
-        let neckBottom = max(0, height - notchHeight)
+        let neckBottom = max(rect.minY, rect.maxY - notchHeight)
         let closedRadius = min(CGFloat(10), min(notchHeight * 0.38, neckHalfWidth / 2))
         let expandedRadius = min(CGFloat(28), (width - bodyInset * 2) / 4)
         let bottomRadius = interpolate(closedRadius, expandedRadius, progress)
-        let bodyLeft = interpolate(neckLeft, bodyInset, progress)
-        let bodyRight = interpolate(neckRight, width - bodyInset, progress)
-        let bodyBottom = interpolate(neckBottom, 0, progress)
+        let bodyLeft = interpolate(neckLeft, rect.minX + bodyInset, progress)
+        let bodyRight = interpolate(neckRight, rect.maxX - bodyInset, progress)
+        let bodyBottom = interpolate(neckBottom, rect.minY, progress)
         let neckEdgeBottom = interpolate(neckBottom + closedRadius, neckBottom + 4, progress)
-        let topLeft = interpolate(neckLeft, 0, progress)
-        let topRight = interpolate(neckRight, width, progress)
+        let topLeft = interpolate(neckLeft, rect.minX, progress)
+        let topRight = interpolate(neckRight, rect.maxX, progress)
         let shoulderStartY = interpolate(neckEdgeBottom, top, progress)
         let shoulderBottom = interpolate(
             neckBottom + closedRadius,
-            max(32, height - notchHeight),
+            max(rect.minY + 32, rect.maxY - notchHeight),
             progress
         )
-        let expandedShoulderControlY = height - notchHeight * 0.46
+        let expandedShoulderControlY = rect.maxY - notchHeight * 0.46
         let shoulderControlY = interpolate(
             shoulderBottom,
             expandedShoulderControlY,
@@ -263,7 +380,7 @@ final class HUDContentView: NSView {
         path.addCurve(
             to: CGPoint(x: bodyRight, y: shoulderBottom),
             control1: CGPoint(
-                x: interpolate(neckRight, width - bodyInset * 0.52, progress),
+                x: interpolate(neckRight, rect.maxX - bodyInset * 0.52, progress),
                 y: shoulderStartY
             ),
             control2: CGPoint(
@@ -291,7 +408,7 @@ final class HUDContentView: NSView {
                 y: shoulderControlY
             ),
             control2: CGPoint(
-                x: interpolate(neckLeft, bodyInset * 0.52, progress),
+                x: interpolate(neckLeft, rect.minX + bodyInset * 0.52, progress),
                 y: shoulderStartY
             )
         )
@@ -319,19 +436,11 @@ final class HUDContentView: NSView {
 
     override func mouseEntered(with event: NSEvent) {
         onHoverChanged?(true)
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.12
-            context.timingFunction = NotchMotion.ease
-            controls.forEach { $0.animator().alphaValue = 1 }
-        }
+        setControlsVisible(true, animated: true)
     }
 
     override func mouseExited(with event: NSEvent) {
         onHoverChanged?(false)
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.14
-            context.timingFunction = NotchMotion.ease
-            controls.forEach { $0.animator().alphaValue = 0 }
-        }
+        setControlsVisible(false, animated: true)
     }
 }

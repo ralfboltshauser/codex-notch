@@ -4,7 +4,6 @@ import QuartzCore
 
 final class OverlayController {
     static let eventVisibilityDuration: TimeInterval = 5
-    private static let hardwareNotchPadding: CGFloat = 10
 
     private enum Phase {
         case hidden
@@ -14,7 +13,7 @@ final class OverlayController {
         case launching
     }
 
-    private let panel: FocuslessPanel
+    let panel: FocuslessPanel
     private let shouldReduceMotion: () -> Bool
     private let shortcutModifierState: () -> Bool
     private let automaticOpenAllowed: () -> Bool
@@ -23,38 +22,40 @@ final class OverlayController {
     private var tasks: [CompletedTask] = []
     private var activeTasks: [ActiveTask] = []
     private var showsActiveTasks = ActiveTaskPreferences.shared.isVisible
-    private var hideTimer: Timer?
+    var hideTimer: Timer?
     private var shortcutModifierTimer: Timer?
     private var relativeTimeTimer: Timer?
-    private var shortcutLettersVisible = false
+    var shortcutLettersVisible = false
     private var lockedActiveTasks: [ActiveTask]?
     private var lockedCompletedTasks: [CompletedTask]?
     private var eventAutoCloseCanBeCancelled = false
     private var targetScreen: NSScreen?
-    private var isPinned = false
-    private var isThemePreviewActive = false
-    private var currentBodyInset: CGFloat = 0
-    private var currentNotchWidth: CGFloat = 0
-    private var currentNotchHeight: CGFloat = 0
+    var isPinned = false
+    private var isPointerInsideContent = false
+    var isThemePreviewActive = false
+    var presentationScope = OverlayPresentationScope.full
+    var currentBodyInset: CGFloat = 0
+    var currentNotchWidth: CGFloat = 0
+    var currentNotchHeight: CGFloat = 0
     private var transitionID = 0
     private var phase: Phase = .hidden
     private var pendingRebuild = false
-    private var updateVersion: String?
+    var updateVersion: String?
     private var usageState: CodexUsageState = .idle
-    private var remoteHealth = RemoteHostHealthSnapshot.empty
-    private weak var updateButton: ClosureButton?
-    private weak var settingsButton: ClosureButton?
-    private weak var hostStatusBadge: HostStatusBadgeView?
-    private weak var weeklyUsageBadge: WeeklyUsageHeaderView?
-    private weak var emptyStateView: EmptyStateView?
-    private weak var shortcutHintLabel: NSTextField?
-    private weak var activeSectionLabel: NSTextField?
-    private weak var activeFreezeLabel: NSTextField?
-    private weak var rootView: HUDContentView?
-    private var rowsByEventID: [String: TaskRowView] = [:]
-    private var activeTaskRows: [ActiveTaskRowView] = []
+    var remoteHealth = RemoteHostHealthSnapshot.empty
+    weak var updateButton: ClosureButton?
+    weak var settingsButton: ClosureButton?
+    weak var hostStatusBadge: HostStatusBadgeView?
+    weak var weeklyUsageBadge: WeeklyUsageHeaderView?
+    weak var emptyStateView: EmptyStateView?
+    weak var shortcutHintLabel: NSTextField?
+    weak var activeSectionLabel: NSTextField?
+    weak var activeFreezeLabel: NSTextField?
+    weak var rootView: HUDContentView?
+    var rowsByEventID: [String: TaskRowView] = [:]
+    var activeTaskRows: [ActiveTaskRowView] = []
     private var dismissingEventIDs: Set<String> = []
-    private var triggeringEventID: String?
+    var triggeringEventID: String?
     private var themeObserver: NSObjectProtocol?
 
     var onOpen: ((CompletedTask) -> Bool)?
@@ -68,93 +69,7 @@ final class OverlayController {
     var onToggleActiveTasks: (() -> Void)?
     var onUpdate: (() -> Void)?
     var onVisibilityChanged: ((Bool) -> Void)?
-    var frameForTesting: NSRect { panel.frame }
-    var bodyHeightForTesting: CGFloat { panel.frame.height }
-    var bodyWidthForTesting: CGFloat { panel.frame.width - currentBodyInset * 2 }
-    var notchWidthForTesting: CGFloat { currentNotchWidth }
-    var notchHeightForTesting: CGFloat { currentNotchHeight }
-    var eventVisibilityDurationForTesting: TimeInterval { Self.eventVisibilityDuration }
-    var hoverOpenDurationForTesting: TimeInterval { NotchMotion.hoverOpenDuration }
-    var isPinnedForTesting: Bool { isPinned }
-    var isThemePreviewActiveForTesting: Bool { isThemePreviewActive }
-    var hasHideTimerForTesting: Bool { hideTimer?.isValid == true }
-    var isVisibleForTesting: Bool { panel.isVisible }
     var isLaunchingForTesting: Bool { phase == .launching }
-    var panelAlphaForTesting: CGFloat { panel.alphaValue }
-    var contentViewForTesting: NSView? { panel.contentView }
-    var isUpdateAvailableForTesting: Bool { updateVersion != nil }
-    var updateButtonForTesting: NSButton? { updateButton }
-    var settingsButtonForTesting: NSButton? { settingsButton }
-    var remoteStatusTextForTesting: String? {
-        remoteHealth.hosts.isEmpty ? nil : remoteHealth.summaryText
-    }
-    var hostStatusCountForTesting: String? { hostStatusBadge?.countTextForTesting }
-    var hostStatusToolTipForTesting: String? { hostStatusBadge?.toolTip }
-    var hostStatusCountColorForTesting: NSColor? { hostStatusBadge?.countColorForTesting }
-    var hostStatusButtonForTesting: NSButton? { hostStatusBadge }
-    var hostStatusFrameForTesting: NSRect? { hostStatusBadge?.frame }
-    var hasEmptyStateForTesting: Bool { emptyStateView != nil }
-    var weeklyUsageTextForTesting: String? { weeklyUsageBadge?.valueTextForTesting }
-    var weeklyUsageToolTipForTesting: String? { weeklyUsageBadge?.toolTip }
-    var weeklyUsageValueFitsForTesting: Bool {
-        weeklyUsageBadge?.valueFitsWithoutTruncationForTesting == true
-    }
-    var weeklyUsageButtonForTesting: NSButton? { weeklyUsageBadge }
-    var weeklyUsageFrameForTesting: NSRect? { weeklyUsageBadge?.frame }
-    var isShortcutOrderLockedForTesting: Bool { shortcutLettersVisible }
-    var shortcutHintTextForTesting: String? { shortcutHintLabel?.stringValue }
-    var activeFreezeTextForTesting: String? { activeFreezeLabel?.stringValue }
-    var activeFreezeToolTipForTesting: String? { activeFreezeLabel?.toolTip }
-    var isActiveFreezeIndicatorVisibleForTesting: Bool {
-        activeFreezeLabel?.isHidden == false
-    }
-    var isActiveFreezeIndicatorBesideSectionForTesting: Bool {
-        guard let section = activeSectionLabel,
-              let frozen = activeFreezeLabel,
-              section.superview === frozen.superview else { return false }
-        section.superview?.layoutSubtreeIfNeeded()
-        return frozen.frame.minX >= section.frame.maxX
-            && abs(frozen.frame.midY - section.frame.midY) <= 1
-    }
-    var shortcutTaskTitlesForTesting: [String] {
-        shortcutActiveTasks.map(\.title) + shortcutCompletedTasks.map(\.title)
-    }
-    var taskBadgeTextsForTesting: [String] {
-        activeTaskRows.map(\.badgeTextForTesting)
-            + presentedTasks.compactMap { rowsByEventID[$0.eventID]?.badgeTextForTesting }
-    }
-    var taskRelativeTimesForTesting: [String] {
-        presentedTasks.compactMap { rowsByEventID[$0.eventID]?.relativeTimeTextForTesting }
-    }
-    var triggeredTaskEventIDsForTesting: [String] {
-        presentedTasks.compactMap { task in
-            rowsByEventID[task.eventID]?.isTriggeredForTesting == true ? task.eventID : nil
-        }
-    }
-    var rowArrivalAnimationCountForTesting: Int {
-        rowsByEventID.values.filter(\.hasArrivalAnimationForTesting).count
-    }
-    var hasContentAnimationForTesting: Bool {
-        rootView?.hasContentAnimationForTesting == true
-    }
-    var headerTopInsetForTesting: CGFloat? { rootView?.headerTopInsetForTesting }
-    var headerHasAmbiguousLayoutForTesting: Bool {
-        rootView?.headerHasAmbiguousLayoutForTesting == true
-    }
-    var headerButtonTitlesForTesting: [String] {
-        rootView?.headerButtonTitlesForTesting ?? []
-    }
-    static func menuBarNotchExclusionForTesting(
-        notchWidth: CGFloat,
-        centerOffset: CGFloat,
-        hasHardwareNotch: Bool
-    ) -> ClosedRange<CGFloat>? {
-        menuBarNotchExclusion(
-            notchWidth: notchWidth,
-            centerOffset: centerOffset,
-            hasHardwareNotch: hasHardwareNotch
-        )
-    }
     var hasContent: Bool {
         !tasks.isEmpty
             || (showsActiveTasks && !activeTasks.isEmpty)
@@ -169,11 +84,17 @@ final class OverlayController {
     private var displayedActiveTasks: [ActiveTask] {
         showsActiveTasks ? Array(activeTasks.prefix(4)) : []
     }
-    private var shortcutActiveTasks: [ActiveTask] {
-        lockedActiveTasks ?? displayedActiveTasks
+    var presentationCompletedTasks: [CompletedTask] {
+        presentationScope.completedTasks(from: presentedTasks)
     }
-    private var shortcutCompletedTasks: [CompletedTask] {
-        lockedCompletedTasks ?? presentedTasks
+    var presentationActiveTasks: [ActiveTask] {
+        presentationScope == .full ? displayedActiveTasks : []
+    }
+    var shortcutActiveTasks: [ActiveTask] {
+        lockedActiveTasks ?? presentationActiveTasks
+    }
+    var shortcutCompletedTasks: [CompletedTask] {
+        lockedCompletedTasks ?? presentationCompletedTasks
     }
     private var currentHostHealthOverview: HostHealthOverview {
         HostHealthOverview(local: localHostHealth(), remote: remoteHealth)
@@ -234,6 +155,10 @@ final class OverlayController {
 
     func refreshShortcutModifierStateForTesting() {
         refreshShortcutModifierState()
+    }
+
+    func contentHoverChangedForTesting(_ hovering: Bool) {
+        contentHoverChanged(hovering)
     }
 
     private func themeDidChange() {
@@ -354,15 +279,37 @@ final class OverlayController {
 
     func showForEvent(triggeringEventID: String? = nil) {
         guard automaticOpenAllowed(), hasContent else { return }
-        if let triggeringEventID {
-            setTriggeringEventID(triggeringEventID)
+        let resolvedTrigger = triggeringEventID.flatMap { eventID in
+            presentedTasks.contains(where: { $0.eventID == eventID }) ? eventID : nil
+        }
+        if phase == .hidden {
+            targetScreen = screenUnderPointer()
+            if let resolvedTrigger {
+                presentationScope = .triggeredTask(eventID: resolvedTrigger)
+            } else {
+                presentationScope = .full
+            }
+            setTriggeringEventID(resolvedTrigger, animated: false)
+            rebuildContent(initiallyExpanded: false)
+        } else if let resolvedTrigger {
+            if presentationScope.triggeringEventID != nil, !isPinned {
+                presentationScope = .triggeredTask(eventID: resolvedTrigger)
+                setTriggeringEventID(resolvedTrigger, animated: false)
+                if shortcutLettersVisible {
+                    pendingRebuild = true
+                } else {
+                    rebuildContent(initiallyExpanded: true)
+                    positionPanel()
+                }
+            } else {
+                setTriggeringEventID(resolvedTrigger)
+            }
         }
         if !isPinned { eventAutoCloseCanBeCancelled = true }
         if shortcutLettersVisible, panel.isVisible {
             makeEventPresentationPersistent()
             return
         }
-        if phase == .hidden { targetScreen = screenUnderPointer() }
         if phase == .open || phase == .opening {
             if !isPinned { scheduleHide(after: Self.eventVisibilityDuration) }
             return
@@ -373,11 +320,12 @@ final class OverlayController {
     func showFromNotchHover(on screen: NSScreen) {
         guard !isThemePreviewActive, phase != .launching else { return }
         guard phase != .open, phase != .opening else { return }
+        presentationScope = .full
         setTriggeringEventID(nil, animated: false)
         targetScreen = screen
         isPinned = false
         eventAutoCloseCanBeCancelled = false
-        if phase == .hidden { rebuildContent(initiallyExpanded: false) }
+        rebuildContent(initiallyExpanded: false)
         present(autoHide: true, duration: NotchMotion.hoverOpenDuration)
     }
 
@@ -386,9 +334,11 @@ final class OverlayController {
         isThemePreviewActive = visible
         eventAutoCloseCanBeCancelled = false
         if visible {
+            presentationScope = .full
             setTriggeringEventID(nil, animated: false)
             targetScreen = screen ?? screenUnderPointer()
             isPinned = true
+            rebuildContent(initiallyExpanded: false)
             present(autoHide: false, duration: 0)
         } else {
             hide(immediately: true)
@@ -399,20 +349,32 @@ final class OverlayController {
         guard !isThemePreviewActive else { return }
         switch phase {
         case .hidden:
+            presentationScope = .full
             setTriggeringEventID(nil, animated: false)
             targetScreen = screenUnderPointer()
             isPinned = true
             eventAutoCloseCanBeCancelled = false
+            rebuildContent(initiallyExpanded: false)
             present(autoHide: false, duration: 0)
         case .closing:
-            setTriggeringEventID(nil, animated: false)
-            isPinned = true
-            eventAutoCloseCanBeCancelled = false
-            present(autoHide: false, duration: 0)
+            if presentationScope.triggeringEventID != nil {
+                promoteTriggeredPresentationToFull(pin: true)
+            } else {
+                presentationScope = .full
+                setTriggeringEventID(nil, animated: false)
+                isPinned = true
+                eventAutoCloseCanBeCancelled = false
+                rebuildContent(initiallyExpanded: false)
+                present(autoHide: false, duration: 0)
+            }
         case .launching:
             break
         case .opening, .open:
-            hide(immediately: true)
+            if presentationScope.triggeringEventID != nil {
+                promoteTriggeredPresentationToFull(pin: true)
+            } else {
+                hide(immediately: true)
+            }
         }
     }
 
@@ -583,6 +545,74 @@ final class OverlayController {
         if autoHide, !isPinned { scheduleHide(after: Self.eventVisibilityDuration) }
     }
 
+    private func contentHoverChanged(_ hovering: Bool) {
+        isPointerInsideContent = hovering
+        if hovering {
+            hideTimer?.invalidate()
+            if presentationScope.triggeringEventID != nil {
+                promoteTriggeredPresentationToFull(pin: isPinned)
+            }
+        } else if !isPinned {
+            scheduleHide(after: Self.eventVisibilityDuration)
+        }
+    }
+
+    private func promoteTriggeredPresentationToFull(pin: Bool) {
+        guard let eventID = presentationScope.triggeringEventID,
+              phase == .open || phase == .opening || phase == .closing else { return }
+        let compactHeight = panel.frame.height
+        let compactShapePath = rootView?.currentShapePathForPromotion
+        let oldRowFrame = rowsByEventID[eventID].map(screenFrame)
+
+        transitionID &+= 1
+        let promotionTransitionID = transitionID
+        hideTimer?.invalidate()
+        presentationScope = .full
+        if pin {
+            isPinned = true
+            eventAutoCloseCanBeCancelled = false
+        }
+        if shortcutLettersVisible {
+            lockedActiveTasks = displayedActiveTasks
+            lockedCompletedTasks = presentedTasks
+        }
+
+        phase = .opening
+        rebuildContent(initiallyExpanded: true)
+        positionPanel()
+        let reduceMotion = shouldReduceMotion()
+        if isPointerInsideContent {
+            rootView?.setControlsVisible(true, animated: !reduceMotion)
+        }
+        if reduceMotion {
+            rootView?.prepareReducedMotionPromotion()
+            rootView?.animateReducedMotionContent(
+                visible: true,
+                duration: NotchMotion.reducedMotionFadeDuration
+            )
+        } else {
+            rootView?.animatePromotion(
+                fromExpandedHeight: compactHeight,
+                sourcePath: compactShapePath
+            )
+            if let oldRowFrame, let row = rowsByEventID[eventID] {
+                row.animatePromotion(from: oldRowFrame, to: screenFrame(row))
+            }
+        }
+
+        let duration = reduceMotion
+            ? NotchMotion.reducedMotionFadeDuration
+            : NotchMotion.promotionDuration
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
+            guard let self, self.transitionID == promotionTransitionID else { return }
+            self.phase = .open
+            self.finishPendingRebuild(expanded: true)
+            if !self.isPinned, !self.isPointerInsideContent {
+                self.scheduleHide(after: Self.eventVisibilityDuration)
+            }
+        }
+    }
+
     private func openTask(_ task: CompletedTask, animated: Bool = true) {
         guard phase != .launching, onOpen?(task) == true else { return }
         guard animated, phase != .hidden, !shouldReduceMotion() else {
@@ -621,18 +651,21 @@ final class OverlayController {
     private func rebuildContent(initiallyExpanded: Bool) {
         let theme = ThemeStore.shared.activeTheme
         let screen = targetScreen ?? screenUnderPointer()
-        let geometry = islandGeometry(for: screen)
+        let geometry = OverlayGeometry.island(for: screen)
         currentBodyInset = geometry.bodyInset
         currentNotchWidth = geometry.notchWidth
         currentNotchHeight = geometry.notchHeight
-        let completedTasks = presentedTasks
+        let completedTasks = presentationCompletedTasks
+        let activeTasks = presentationActiveTasks
         let built = OverlayContentBuilder.build(
             configuration: OverlayContentConfiguration(
                 geometry: geometry,
                 theme: theme,
                 completedTasks: completedTasks,
-                displayedActiveTasks: displayedActiveTasks,
-                totalActiveTaskCount: activeTasks.count,
+                displayedActiveTasks: activeTasks,
+                totalActiveTaskCount: presentationScope == .full
+                    ? self.activeTasks.count
+                    : 0,
                 showsActiveTasks: showsActiveTasks,
                 shortcutLettersVisible: shortcutLettersVisible,
                 updateVersion: updateVersion,
@@ -641,7 +674,7 @@ final class OverlayController {
                 triggeringEventID: triggeringEventID,
                 dismissingEventIDs: dismissingEventIDs,
                 now: now(),
-                notchExclusion: Self.menuBarNotchExclusion(
+                notchExclusion: OverlayGeometry.menuBarNotchExclusion(
                     notchWidth: geometry.notchWidth,
                     centerOffset: geometry.notchCenterOffset,
                     hasHardwareNotch: geometry.hasHardwareNotch
@@ -659,11 +692,7 @@ final class OverlayController {
                 openCompletedTask: { [weak self] task in self?.openTask(task) },
                 dismissTask: { [weak self] index in self?.dismissTask(at: index) },
                 hoverChanged: { [weak self] hovering in
-                    if hovering {
-                        self?.hideTimer?.invalidate()
-                    } else if self?.isPinned == false {
-                        self?.scheduleHide(after: Self.eventVisibilityDuration)
-                    }
+                    self?.contentHoverChanged(hovering)
                 }
             )
         )
@@ -714,6 +743,8 @@ final class OverlayController {
         if wasVisible {
             stopShortcutModifierMonitoring()
             stopRelativeTimeMonitoring()
+            isPointerInsideContent = false
+            presentationScope = .full
             setTriggeringEventID(nil, animated: false)
             onVisibilityChanged?(false)
         }
@@ -784,8 +815,8 @@ final class OverlayController {
     private func setShortcutLettersVisible(_ visible: Bool) {
         guard shortcutLettersVisible != visible else { return }
         if visible {
-            lockedActiveTasks = displayedActiveTasks
-            lockedCompletedTasks = presentedTasks
+            lockedActiveTasks = presentationActiveTasks
+            lockedCompletedTasks = presentationCompletedTasks
             hideTimer?.invalidate()
             makeEventPresentationPersistent()
         }
@@ -820,30 +851,6 @@ final class OverlayController {
             x: frame.midX - panel.frame.width / 2,
             y: frame.maxY - panel.frame.height
         )
-    }
-
-    private func islandGeometry(for screen: NSScreen) -> IslandGeometry {
-        let notch = ScreenNotchGeometry(screen: screen)
-        let bodyInset: CGFloat = 34
-        let bodyWidth = min(820, max(460, screen.frame.width - 160))
-        return IslandGeometry(
-            windowWidth: bodyWidth + bodyInset * 2,
-            bodyInset: bodyInset,
-            notchWidth: notch.width,
-            notchHeight: notch.height,
-            notchCenterOffset: notch.centerOffset,
-            hasHardwareNotch: notch.hasHardwareNotch
-        )
-    }
-
-    private static func menuBarNotchExclusion(
-        notchWidth: CGFloat,
-        centerOffset: CGFloat,
-        hasHardwareNotch: Bool
-    ) -> ClosedRange<CGFloat>? {
-        guard hasHardwareNotch else { return nil }
-        let halfWidth = notchWidth / 2 + hardwareNotchPadding
-        return (centerOffset - halfWidth)...(centerOffset + halfWidth)
     }
 
     private func screenUnderPointer() -> NSScreen {
