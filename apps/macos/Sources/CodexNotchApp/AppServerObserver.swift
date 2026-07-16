@@ -7,7 +7,10 @@ final class AppServerObserver {
     private let queue = DispatchQueue(label: "com.ralfbuilds.codex-notch.app-server")
     private let sourceID: String
     private let sourceLabel: String
-    private var client: UnixWebSocketClient?
+    private let socketCandidatesProvider: () -> [String]
+    private let pathExists: (String) -> Bool
+    private let clientFactory: (String, DispatchQueue) -> AppServerSocketClient
+    private var client: AppServerSocketClient?
     private var reconnect: DispatchWorkItem?
     private var pollTimer: DispatchSourceTimer?
     private var generation = UUID().uuidString.lowercased()
@@ -15,12 +18,31 @@ final class AppServerObserver {
     private var nextRequestID = 2
     private var initialized = false
     private var stopped = true
+    private var pendingUsageRequestID: Int?
+    private var pendingUsageTimeout: DispatchWorkItem?
+    private var usageRefreshRequested = true
 
     var onSnapshot: ((String, String, ActiveTaskSnapshot) -> Void)?
+    var onRateLimits: ((Data) -> Void)?
 
-    init(sourceID: String = "local", sourceLabel: String = "This Mac") {
+    init(
+        sourceID: String = "local",
+        sourceLabel: String = "This Mac",
+        socketCandidates: @escaping () -> [String] = {
+            AppServerObserver.socketCandidates()
+        },
+        pathExists: @escaping (String) -> Bool = {
+            FileManager.default.fileExists(atPath: $0)
+        },
+        clientFactory: @escaping (String, DispatchQueue) -> AppServerSocketClient = {
+            UnixWebSocketClient(path: $0, queue: $1)
+        }
+    ) {
         self.sourceID = sourceID
         self.sourceLabel = sourceLabel
+        socketCandidatesProvider = socketCandidates
+        self.pathExists = pathExists
+        self.clientFactory = clientFactory
     }
 
     func start() {
@@ -40,22 +62,39 @@ final class AppServerObserver {
             pollTimer = nil
             client?.close()
             client = nil
+            pendingUsageRequestID = nil
+            pendingUsageTimeout?.cancel()
+            pendingUsageTimeout = nil
+            usageRefreshRequested = true
+        }
+    }
+
+    func requestUsage() {
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.usageRefreshRequested = true
+            self.sendUsageRequestIfPossible()
         }
     }
 
     private func connect() {
         guard !stopped else { return }
-        let sockets = Self.socketCandidates().filter {
-            FileManager.default.fileExists(atPath: $0)
-        }
+        let sockets = socketCandidatesProvider().filter(pathExists)
         for socket in sockets {
-            let candidate = UnixWebSocketClient(path: socket, queue: queue)
+            let candidate = clientFactory(socket, queue)
+            let candidateID = ObjectIdentifier(candidate)
             candidate.onText = { [weak self] data in self?.handle(data) }
-            candidate.onClose = { [weak self, weak candidate] in
+            candidate.onClose = { [weak self] in
                 self?.queue.async {
-                    guard let self, self.client === candidate else { return }
+                    guard let self,
+                          let client = self.client,
+                          ObjectIdentifier(client) == candidateID else { return }
                     self.client = nil
                     self.initialized = false
+                    self.pendingUsageRequestID = nil
+                    self.pendingUsageTimeout?.cancel()
+                    self.pendingUsageTimeout = nil
+                    self.usageRefreshRequested = true
                     self.pollTimer?.cancel()
                     self.pollTimer = nil
                     self.scheduleReconnect()
@@ -67,6 +106,10 @@ final class AppServerObserver {
                 generation = UUID().uuidString.lowercased()
                 sequence = 0
                 initialized = false
+                pendingUsageRequestID = nil
+                pendingUsageTimeout?.cancel()
+                pendingUsageTimeout = nil
+                usageRefreshRequested = true
                 try candidate.send(json: [
                     "id": 1,
                     "method": "initialize",
@@ -90,7 +133,17 @@ final class AppServerObserver {
             initialized = true
             try? client?.send(json: ["method": "initialized"])
             requestSnapshot()
+            sendUsageRequestIfPossible()
             startPolling()
+            return
+        }
+        if let id = (value["id"] as? NSNumber)?.intValue,
+           id == pendingUsageRequestID {
+            pendingUsageRequestID = nil
+            pendingUsageTimeout?.cancel()
+            pendingUsageTimeout = nil
+            if value["result"] != nil { onRateLimits?(data) }
+            sendUsageRequestIfPossible()
             return
         }
         if let result = value["result"] as? [String: Any], let rows = result["data"] as? [[String: Any]] {
@@ -119,6 +172,36 @@ final class AppServerObserver {
                 "useStateDbOnly": true,
             ],
         ])
+    }
+
+    private func sendUsageRequestIfPossible() {
+        guard initialized,
+              usageRefreshRequested,
+              pendingUsageRequestID == nil,
+              let client else { return }
+        let id = nextRequestID
+        nextRequestID &+= 1
+        usageRefreshRequested = false
+        pendingUsageRequestID = id
+        do {
+            try client.send(json: [
+                "id": id,
+                "method": "account/rateLimits/read",
+                "params": NSNull(),
+            ])
+            let timeout = DispatchWorkItem { [weak self] in
+                guard let self, self.pendingUsageRequestID == id else { return }
+                self.pendingUsageRequestID = nil
+                self.pendingUsageTimeout = nil
+                self.sendUsageRequestIfPossible()
+            }
+            pendingUsageTimeout = timeout
+            queue.asyncAfter(deadline: .now() + 6, execute: timeout)
+        } catch {
+            pendingUsageRequestID = nil
+            pendingUsageTimeout = nil
+            usageRefreshRequested = true
+        }
     }
 
     private func publish(_ rows: [[String: Any]]) {

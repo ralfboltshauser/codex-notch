@@ -79,6 +79,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         usageMonitor.onChange = { [weak self] state in
             self?.overlay.setUsageState(state)
         }
+        usageMonitor.onRefreshRequested = { [weak self] in
+            self?.appServerObserver.requestUsage()
+        }
+        appServerObserver.onRateLimits = { [weak self] response in
+            self?.usageMonitor.acceptRateLimitResponse(response)
+        }
         overlay.onRefreshUsage = { [weak self] in self?.usageMonitor.refresh() }
         store.onChange = { [weak self] tasks in self?.overlay.update(tasks: tasks) }
         overlay.update(tasks: store.tasks)
