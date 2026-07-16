@@ -301,7 +301,19 @@ enum OverlayContentBuilder {
             header.widthAnchor.constraint(equalTo: stack.widthAnchor),
         ])
         root.onHoverChanged = actions.hoverChanged
-        root.configureMotion(contentHost: stack, header: header, rows: rows)
+        let promotionAnchorRow = configuration.triggeringEventID.flatMap {
+            rowLookup[$0]
+        }
+        let promotionRevealViews = stack.arrangedSubviews.filter { view in
+            if view === header { return false }
+            return promotionAnchorRow.map { view !== $0 } ?? true
+        }
+        root.configureMotion(
+            contentHost: stack,
+            header: header,
+            rows: rows,
+            promotionRevealViews: promotionRevealViews
+        )
 
         let activeHeight = configuration.displayedActiveTasks.isEmpty
             ? 0
