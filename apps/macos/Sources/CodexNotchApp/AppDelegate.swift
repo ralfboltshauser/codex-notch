@@ -116,6 +116,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlay.onVisibilityChanged = { [weak self] visible in
             guard let self else { return }
             self.hotKeys?.setSettingsShortcutEnabled(visible)
+            self.onboarding?.notchVisibilityChanged(visible)
             if visible { self.remoteHealthMonitor.refresh() }
         }
 
@@ -175,9 +176,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.usageMonitor.refresh()
         }
 
-        if !CodexHookInstaller().isInstalled
-            || !UserDefaults.standard.bool(forKey: OnboardingWindowController.completionKey) {
-            showOnboarding()
+        if !UserDefaults.standard.bool(forKey: OnboardingWindowController.completionKey) {
+            showOnboarding(startOnboarding: true)
         }
     }
 
@@ -263,11 +263,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func showOnboarding(showConnections: Bool = false) {
+    private func showOnboarding(
+        showConnections: Bool = false,
+        startOnboarding: Bool = false
+    ) {
         if let onboarding {
             onboarding.updateRemoteHealth(remoteHealthMonitor.snapshot)
             if showConnections {
                 onboarding.presentConnections()
+            } else if startOnboarding {
+                onboarding.presentOnboarding()
             } else {
                 onboarding.present()
             }
@@ -277,7 +282,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         onboarding = OnboardingWindowController(
             pairings: pairings,
             pairer: pairer,
-            notificationSounds: notificationSounds
+            notificationSounds: notificationSounds,
+            startInOnboarding: startOnboarding
         )
         onboarding?.onConnectionsChanged = { [weak self] in
             _ = try? self?.startRemoteListener()
@@ -299,6 +305,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         onboarding?.onThemePreviewVisibilityChanged = { [weak self] visible, screen in
             self?.overlay.setThemePreviewVisible(visible, on: screen)
         }
+        onboarding?.onTryNotch = { [weak self] in self?.overlay.toggle() }
         onboarding?.onUninstall = { [weak self] completion in
             self?.uninstall(completion: completion)
         }

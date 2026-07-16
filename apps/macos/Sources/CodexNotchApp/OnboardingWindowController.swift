@@ -26,6 +26,9 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
     private let notificationSounds: NotificationSoundPlayer
     private let doNotDisturbPreferences: DoNotDisturbPreferences
     private let isHookInstalled: () -> Bool
+    private let isHookTrusted: () -> Bool
+    private let installHook: () throws -> Void
+    private let openHookReview: () throws -> Void
     private let shouldReduceMotion: () -> Bool
     private let root = ThemeBackdropView()
     private let content = NSView()
@@ -47,15 +50,30 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
     private var taskLayoutViews: [String: NSView] = [:]
     private var changelogCards: [ChangelogReleaseCardView] = []
     private weak var changelogScrollView: NSScrollView?
+    private weak var replayOnboardingButton: ClosureButton?
+    private var onboardingFlow: OnboardingFlowView?
+    private var hookStateTimer: Timer?
 
     var onConnectionsChanged: (() -> Void)?
     var onRefreshConnections: (() -> Void)?
     var onCheckForUpdates: (() -> Void)?
     var onUninstall: ((@escaping (Result<Void, Error>) -> Void) -> Void)?
     var onThemePreviewVisibilityChanged: ((Bool, NSScreen?) -> Void)?
+    var onTryNotch: (() -> Void)?
 
     var checkForUpdatesButtonForTesting: NSButton? { checkForUpdatesButton }
     var doNotDisturbButtonForTesting: NSButton? { doNotDisturbButton }
+    var replayOnboardingButtonForTesting: NSButton? { replayOnboardingButton }
+    var onboardingStepForTesting: OnboardingStep? { onboardingFlow?.stepForTesting }
+    var onboardingPrimaryButtonForTesting: NSButton? {
+        onboardingFlow?.primaryButtonForTesting
+    }
+    var onboardingSecondaryButtonForTesting: NSButton? {
+        onboardingFlow?.secondaryButtonForTesting
+    }
+    var onboardingHasAmbiguityForTesting: Bool {
+        onboardingFlow?.bodyHasAmbiguousLayoutForTesting ?? false
+    }
     var settingsTabTitlesForTesting: [String] { settingsTabs.map(\.title) }
     var selectedSettingsTabTitleForTesting: String { selectedPage.title }
     var renderedThemeChoiceCountForTesting: Int { themeCards.count }
@@ -120,6 +138,10 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         notificationSounds: NotificationSoundPlayer = NotificationSoundPlayer(),
         doNotDisturbPreferences: DoNotDisturbPreferences = .shared,
         isHookInstalled: @escaping () -> Bool = { CodexHookInstaller().isInstalled },
+        isHookTrusted: @escaping () -> Bool = { CodexHookInstaller().isTrusted },
+        installHook: @escaping () throws -> Void = { try CodexHookInstaller().install() },
+        openHookReview: @escaping () throws -> Void = { try CodexHookTrustLauncher.openCLI() },
+        startInOnboarding: Bool = false,
         shouldReduceMotion: @escaping () -> Bool = {
             NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         }
@@ -129,6 +151,9 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         self.notificationSounds = notificationSounds
         self.doNotDisturbPreferences = doNotDisturbPreferences
         self.isHookInstalled = isHookInstalled
+        self.isHookTrusted = isHookTrusted
+        self.installHook = installHook
+        self.openHookReview = openHookReview
         self.shouldReduceMotion = shouldReduceMotion
         let window = SettingsWindow(
             contentRect: NSRect(origin: .zero, size: Self.settingsContentSize),
@@ -151,12 +176,17 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
 
         window.contentView = root
         installContentContainer()
-        showAppropriateStep()
+        if startInOnboarding {
+            startOnboarding()
+        } else {
+            buildSettingsPage(selectedPage)
+        }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     func windowWillClose(_ notification: Notification) {
+        hookStateTimer?.invalidate()
         setThemePreviewActive(false)
         ThemeStore.shared.endPreview()
         NSApp.setActivationPolicy(.accessory)
@@ -164,7 +194,6 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
     }
 
     func present() {
-        showAppropriateStep()
         window?.center()
         ApplicationMenu.install()
         NSApp.setActivationPolicy(.regular)
@@ -175,8 +204,17 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
     }
 
     func presentConnections() {
-        selectedPage = .connections
+        buildSettingsPage(.connections)
         present()
+    }
+
+    func presentOnboarding() {
+        startOnboarding()
+        present()
+    }
+
+    func notchVisibilityChanged(_ visible: Bool) {
+        onboardingFlow?.notchVisibilityChanged(visible)
     }
 
     func updateRemoteHealth(_ snapshot: RemoteHostHealthSnapshot) {
@@ -196,14 +234,6 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
                 health: snapshot.health(for: host),
                 refreshing: snapshot.isRefreshing
             )
-        }
-    }
-
-    private func showAppropriateStep() {
-        if isHookInstalled() {
-            buildSettingsPage(selectedPage)
-        } else {
-            buildLocalSetup()
         }
     }
 
@@ -244,6 +274,9 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
     }
 
     private func buildSettingsPage(_ page: SettingsPage) {
+        hookStateTimer?.invalidate()
+        hookStateTimer = nil
+        onboardingFlow = nil
         selectedPage = page
         ThemeStore.shared.endPreview()
         updateThemePreviewVisibility()
@@ -411,95 +444,68 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         layer.add(group, forKey: "settingsContent")
     }
 
-    private func buildLocalSetup() {
+    private func startOnboarding() {
+        setThemePreviewActive(false)
         resetContent()
-        let icon = makeIcon(symbol: "bolt.horizontal.circle.fill")
-        let title = makeLabel("Codex Notch", size: 27, weight: .semibold, color: .white)
-        let subtitle = makeLabel(
-            "Keep completed tasks within reach without moving focus away from your work.",
-            size: 14,
-            weight: .regular,
-            color: NSColor.white.withAlphaComponent(0.52)
+        let flow = OnboardingFlowView(
+            journey: OnboardingJourney(
+                hookInstalled: isHookInstalled(),
+                hookTrusted: isHookTrusted()
+            ),
+            reduceMotion: shouldReduceMotion
         )
-        subtitle.maximumNumberOfLines = 2
-
-        let install = ClosureButton { [weak self] in self?.installLocalHook() }
-        install.title = "Install local completion hook"
-        stylePrimaryButton(install)
-        let uninstall = makeUninstallButton()
-        let version = makeVersionLabel()
-        statusLabel.stringValue = ""
-        configureStatusLabel()
-
-        let stack = NSStackView(views: [icon, title, subtitle, install, statusLabel, uninstall, version])
-        configureStack(stack)
-        stack.setCustomSpacing(9, after: title)
-        stack.setCustomSpacing(34, after: subtitle)
-        stack.setCustomSpacing(8, after: uninstall)
-        content.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            stack.topAnchor.constraint(equalTo: content.topAnchor),
-            icon.widthAnchor.constraint(equalToConstant: 38),
-            icon.heightAnchor.constraint(equalToConstant: 38),
-            install.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            install.heightAnchor.constraint(equalToConstant: 42),
-            statusLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            uninstall.widthAnchor.constraint(equalToConstant: 172),
-            uninstall.heightAnchor.constraint(equalToConstant: 40),
-        ])
+        flow.onInstallHook = { [weak self] in self?.installOnboardingHook() }
+        flow.onReviewHook = { [weak self] in self?.reviewOnboardingHook() }
+        flow.onTryNotch = { [weak self] in self?.onTryNotch?() }
+        flow.onFinish = { [weak self] in self?.completeOnboarding() }
+        flow.onSkip = { [weak self] in self?.completeOnboarding() }
+        onboardingFlow = flow
+        SettingsViewFactory.install(flow, in: content)
+        beginHookStateMonitoring()
     }
 
-    private func buildTrustStep() {
-        resetContent()
-        let icon = makeIcon(symbol: "checkmark.seal.fill")
-        let title = makeLabel("Review the local hook", size: 25, weight: .semibold, color: .white)
-        let subtitle = makeLabel(
-            "Codex requires explicit trust before a new command hook can run.",
-            size: 14,
-            weight: .regular,
-            color: NSColor.white.withAlphaComponent(0.52)
+    private func beginHookStateMonitoring() {
+        hookStateTimer?.invalidate()
+        hookStateTimer = Timer.scheduledTimer(withTimeInterval: 0.75, repeats: true) {
+            [weak self] _ in self?.refreshOnboardingHookState(preserveError: true)
+        }
+    }
+
+    private func refreshOnboardingHookState(
+        error: String? = nil,
+        preserveError: Bool = false
+    ) {
+        onboardingFlow?.updateHook(
+            installed: isHookInstalled(),
+            trusted: isHookTrusted(),
+            error: error,
+            preserveError: preserveError
         )
+    }
 
-        let review = ClosureButton { [weak self] in
-            do { try CodexHookTrustLauncher.openCLI() }
-            catch { self?.setStatus(error.localizedDescription, error: true) }
+    private func installOnboardingHook() {
+        do {
+            try installHook()
+            UserDefaults.standard.set(false, forKey: Self.completionKey)
+            refreshOnboardingHookState()
+        } catch {
+            refreshOnboardingHookState(error: error.localizedDescription)
         }
-        review.title = "Open Codex hook review"
-        styleSecondaryButton(review)
+    }
 
-        let done = ClosureButton { [weak self] in
-            UserDefaults.standard.set(true, forKey: Self.completionKey)
-            self?.transitionContent { self?.buildSettingsPage(.appearance) }
+    private func reviewOnboardingHook() {
+        do {
+            try openHookReview()
+            refreshOnboardingHookState()
+        } catch {
+            refreshOnboardingHookState(error: error.localizedDescription)
         }
-        done.title = "Hook trusted"
-        stylePrimaryButton(done)
-        let version = makeVersionLabel()
+    }
 
-        let buttons = NSStackView(views: [review, done])
-        buttons.orientation = .horizontal
-        buttons.spacing = 10
-        buttons.distribution = .fillEqually
-        statusLabel.stringValue = ""
-        configureStatusLabel()
-
-        let stack = NSStackView(views: [icon, title, subtitle, buttons, statusLabel, version])
-        configureStack(stack)
-        stack.setCustomSpacing(9, after: title)
-        stack.setCustomSpacing(34, after: subtitle)
-        content.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            stack.topAnchor.constraint(equalTo: content.topAnchor),
-            icon.widthAnchor.constraint(equalToConstant: 38),
-            icon.heightAnchor.constraint(equalToConstant: 38),
-            buttons.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            review.heightAnchor.constraint(equalToConstant: 42),
-            done.heightAnchor.constraint(equalToConstant: 42),
-            statusLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
-        ])
+    private func completeOnboarding() {
+        UserDefaults.standard.set(true, forKey: Self.completionKey)
+        buildSettingsPage(.connections)
+        close()
     }
 
     private func buildConnections() {
@@ -508,6 +514,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         let page = ConnectionSettingsPageView(
             header: settingsHeader(selected: .connections),
             theme: ThemeStore.shared.activeTheme,
+            localHealth: currentLocalHostHealth,
             hosts: pairings.hosts,
             health: remoteHealth,
             hostField: hostField,
@@ -516,6 +523,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
             refreshConnections: { [weak self] in self?.onRefreshConnections?() },
             pairHost: { [weak self] in self?.pairRemoteHost() },
             removeHost: { [weak self] host in self?.remove(host) },
+            replayOnboarding: { [weak self] in self?.startOnboarding() },
             uninstall: { [weak self] in self?.confirmUninstall() },
             checkForUpdates: { [weak self] in self?.onCheckForUpdates?() },
             close: { [weak self] in
@@ -528,8 +536,19 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         remoteRows = page.remoteRows
         remoteSummaryLabel = page.remoteSummaryLabel
         remoteRefreshButton = page.remoteRefreshButton
+        replayOnboardingButton = page.replayOnboardingButton
         checkForUpdatesButton = page.checkForUpdatesButton
         updateRemoteHealth(page.displayedHealth)
+    }
+
+    private var currentLocalHostHealth: LocalHostHealth {
+        if !isHookInstalled() {
+            return .needsAttention(message: "Local completion hook is not installed")
+        }
+        if !isHookTrusted() {
+            return .needsAttention(message: "Local completion hook still needs approval")
+        }
+        return .working
     }
     private func confirmUninstall() {
         guard !working else { return }
@@ -581,16 +600,6 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
                     self.setStatus(error.localizedDescription, error: true)
                 }
             }
-        }
-    }
-
-    private func installLocalHook() {
-        do {
-            try CodexHookInstaller().install()
-            UserDefaults.standard.set(false, forKey: Self.completionKey)
-            transitionContent { [weak self] in self?.buildTrustStep() }
-        } catch {
-            setStatus(error.localizedDescription, error: true)
         }
     }
 
@@ -652,53 +661,4 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
     }
 
-    private func configureStack(_ stack: NSStackView) {
-        SettingsViewFactory.configureVerticalStack(stack)
-    }
-
-    private func makeIcon(symbol: String) -> NSImageView {
-        let view = NSImageView(image: NSImage(systemSymbolName: symbol, accessibilityDescription: nil) ?? NSImage())
-        view.contentTintColor = ThemeStore.shared.activeTheme.accent
-        view.translatesAutoresizingMaskIntoConstraints = false
-        return view
-    }
-
-    private func makeLabel(_ text: String, size: CGFloat, weight: NSFont.Weight, color: NSColor) -> NSTextField {
-        SettingsViewFactory.label(
-            text,
-            size: size,
-            weight: weight,
-            color: color
-        )
-    }
-
-    private func makeVersionLabel() -> NSTextField {
-        let label = makeLabel(
-            Self.versionDescription(),
-            size: 11,
-            weight: .regular,
-            color: NSColor.white.withAlphaComponent(0.34)
-        )
-        label.toolTip = "Installed Codex Notch version"
-        return label
-    }
-
-    private func stylePrimaryButton(_ button: ClosureButton) {
-        SettingsViewFactory.style(button, as: .primary)
-    }
-
-    private func styleSecondaryButton(_ button: ClosureButton) {
-        SettingsViewFactory.style(button, as: .secondary)
-    }
-
-    private func styleDestructiveButton(_ button: ClosureButton) {
-        SettingsViewFactory.style(button, as: .destructive)
-    }
-
-    private func makeUninstallButton() -> ClosureButton {
-        let button = ClosureButton { [weak self] in self?.confirmUninstall() }
-        button.title = "Uninstall Codex Notch…"
-        styleDestructiveButton(button)
-        return button
-    }
 }

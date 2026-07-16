@@ -1,6 +1,17 @@
 {
   "releases": [
     {
+      "version": "0.4.24",
+      "date": "2026-07-16",
+      "title": "A first run that earns its finish",
+      "changes": [
+        "A new four-step onboarding introduces the notch, installs the local completion hook, teaches the global shortcut, and ends with a clear first-success moment.",
+        "Setup now verifies the real Codex hook installation and approval state instead of asking you to confirm trust manually.",
+        "Replay the complete onboarding any time from the This Mac card in Connections settings.",
+        "Onboarding motion is brief, topologically consistent, and replaced by gentle fades when Reduce Motion is enabled."
+      ]
+    },
+    {
       "version": "0.4.23",
       "date": "2026-07-16",
       "title": "Your weekly limit, actually live",

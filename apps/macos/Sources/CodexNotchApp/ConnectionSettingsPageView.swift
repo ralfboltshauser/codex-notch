@@ -6,10 +6,12 @@ final class ConnectionSettingsPageView: NSView {
     let remoteSummaryLabel: NSTextField
     let remoteRefreshButton: ClosureButton
     let checkForUpdatesButton: ClosureButton
+    let replayOnboardingButton: ClosureButton
 
     init(
         header: NSView,
         theme: NotchTheme,
+        localHealth: LocalHostHealth,
         hosts: [RemoteHost],
         health: RemoteHostHealthSnapshot,
         hostField: NSTextField,
@@ -18,6 +20,7 @@ final class ConnectionSettingsPageView: NSView {
         refreshConnections: @escaping () -> Void,
         pairHost: @escaping () -> Void,
         removeHost: @escaping (RemoteHost) -> Void,
+        replayOnboarding: @escaping () -> Void,
         uninstall: @escaping () -> Void,
         checkForUpdates: @escaping () -> Void,
         close: @escaping () -> Void
@@ -52,6 +55,8 @@ final class ConnectionSettingsPageView: NSView {
 
         let check = ClosureButton(handler: checkForUpdates)
         checkForUpdatesButton = check
+        let replay = ClosureButton(handler: replayOnboarding)
+        replayOnboardingButton = replay
         super.init(frame: .zero)
 
         let title = SettingsViewFactory.label(
@@ -68,11 +73,17 @@ final class ConnectionSettingsPageView: NSView {
             color: theme.secondaryText,
             theme: theme
         )
+        replay.title = "Replay Onboarding…"
+        replay.toolTip = "Run the guided Codex Notch setup again"
+        SettingsViewFactory.style(replay, as: .secondary, theme: theme)
         let local = Self.connectionRow(
             label: "This Mac",
-            detail: "Local hook",
-            theme: theme
+            detail: localHealth.isWorking ? "Local hook · Working" : "Local hook · Needs setup",
+            theme: theme,
+            working: localHealth.isWorking,
+            trailingView: replay
         )
+        local.toolTip = localHealth.statusLine
         let remoteTitle = SettingsViewFactory.label(
             "REMOTE UBUNTU HOSTS",
             size: 10,
@@ -205,6 +216,8 @@ final class ConnectionSettingsPageView: NSView {
             stack.topAnchor.constraint(equalTo: topAnchor),
             header.widthAnchor.constraint(equalTo: stack.widthAnchor),
             local.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            replay.widthAnchor.constraint(equalToConstant: 154),
+            replay.heightAnchor.constraint(equalToConstant: 34),
             remoteHeader.widthAnchor.constraint(equalTo: stack.widthAnchor),
             remoteRefreshButton.widthAnchor.constraint(equalToConstant: 26),
             remoteRefreshButton.heightAnchor.constraint(equalToConstant: 26),
@@ -230,13 +243,15 @@ final class ConnectionSettingsPageView: NSView {
     private static func connectionRow(
         label: String,
         detail: String,
-        theme: NotchTheme
+        theme: NotchTheme,
+        working: Bool,
+        trailingView: NSView? = nil
     ) -> NSView {
         let indicator = NSImageView(image: NSImage(
-            systemSymbolName: "checkmark.circle.fill",
+            systemSymbolName: working ? "checkmark.circle.fill" : "exclamationmark.circle.fill",
             accessibilityDescription: nil
         ) ?? NSImage())
-        indicator.contentTintColor = theme.accent
+        indicator.contentTintColor = working ? theme.accent : .systemOrange
         let name = SettingsViewFactory.label(
             label,
             size: 13,
@@ -255,7 +270,8 @@ final class ConnectionSettingsPageView: NSView {
         text.orientation = .vertical
         text.alignment = .leading
         text.spacing = 2
-        let row = NSStackView(views: [indicator, text, NSView()])
+        let rowViews = [indicator, text, NSView()] + (trailingView.map { [$0] } ?? [])
+        let row = NSStackView(views: rowViews)
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 10
