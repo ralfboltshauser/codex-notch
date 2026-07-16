@@ -225,6 +225,7 @@ final class CodexUsageTests: CodexNotchTestCase {
         var remainingPercent: Int?
         monitor.onChange = { state in
             guard case .available(let overview) = state else { return }
+            guard remainingPercent == nil else { return }
             remainingPercent = overview.limit.remainingPercent
             available.fulfill()
         }

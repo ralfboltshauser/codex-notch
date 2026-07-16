@@ -72,6 +72,7 @@ final class AppServerObserver {
     func requestUsage() {
         queue.async { [weak self] in
             guard let self else { return }
+            guard self.pendingUsageRequestID == nil else { return }
             self.usageRefreshRequested = true
             self.sendUsageRequestIfPossible()
         }
