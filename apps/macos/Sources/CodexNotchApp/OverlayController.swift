@@ -19,6 +19,7 @@ final class OverlayController {
     private let automaticOpenAllowed: () -> Bool
     private let localHostHealth: () -> LocalHostHealth
     private let now: () -> Date
+    private let isWindowOnActiveSpace: (NSWindow) -> Bool
     private var tasks: [CompletedTask] = []
     private var activeTasks: [ActiveTask] = []
     private var showsActiveTasks = ActiveTaskPreferences.shared.isVisible
@@ -112,13 +113,15 @@ final class OverlayController {
         shortcutModifierState: @escaping () -> Bool = {
             let flags = CGEventSource.flagsState(.combinedSessionState)
             return flags.contains(.maskControl) && flags.contains(.maskShift)
-        }
+        },
+        isWindowOnActiveSpace: @escaping (NSWindow) -> Bool = { $0.isOnActiveSpace }
     ) {
         self.automaticOpenAllowed = automaticOpenAllowed
         self.localHostHealth = localHostHealth
         self.now = now
         self.shouldReduceMotion = shouldReduceMotion
         self.shortcutModifierState = shortcutModifierState
+        self.isWindowOnActiveSpace = isWindowOnActiveSpace
         panel = FocuslessPanel(
             contentRect: .zero,
             styleMask: [.borderless, .nonactivatingPanel],
@@ -131,7 +134,7 @@ final class OverlayController {
         panel.hasShadow = false
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        OverlaySpaceBehavior.configure(panel)
         panel.animationBehavior = .none
         panel.appearance = NSAppearance(named: .darkAqua)
 
@@ -372,6 +375,8 @@ final class OverlayController {
         case .opening, .open:
             if presentationScope.triggeringEventID != nil {
                 promoteTriggeredPresentationToFull(pin: true)
+            } else if panel.isVisible, !isWindowOnActiveSpace(panel) {
+                revealPanelOnActiveSpace()
             } else {
                 hide(immediately: true)
             }
@@ -725,6 +730,16 @@ final class OverlayController {
 
     private func positionPanel() {
         panel.setFrameOrigin(visibleOrigin())
+    }
+
+    private func revealPanelOnActiveSpace() {
+        // AppKit can retain an ordered panel on its previous Space even though
+        // it remains `isVisible`. Reassert the overlay behavior before ordering
+        // it so the global shortcut never acts as a hidden close operation.
+        OverlaySpaceBehavior.configure(panel)
+        targetScreen = screenUnderPointer()
+        positionPanel()
+        panel.orderFrontRegardless()
     }
 
     private func orderPanelFront() {

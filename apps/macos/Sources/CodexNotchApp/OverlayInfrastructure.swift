@@ -53,6 +53,21 @@ enum OverlayGeometry {
     }
 }
 
+enum OverlaySpaceBehavior {
+    static let collectionBehavior: NSWindow.CollectionBehavior = [
+        .canJoinAllSpaces,
+        .canJoinAllApplications,
+        .fullScreenAuxiliary,
+        .stationary,
+        .ignoresCycle,
+    ]
+
+    static func configure(_ panel: NSPanel) {
+        panel.isFloatingPanel = true
+        panel.collectionBehavior = collectionBehavior
+    }
+}
+
 enum NotchMotion {
     static let easeOut = CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1)
     static let ease = CAMediaTimingFunction(controlPoints: 0.25, 0.10, 0.25, 1)
