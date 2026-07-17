@@ -1,4 +1,5 @@
 import AppKit
+import CodexNotchCore
 import Foundation
 
 enum AttentionKind: Equatable {
