@@ -553,6 +553,32 @@ final class OverlayInteractionTests: CodexNotchTestCase {
         XCTAssertEqual(visibility, [true, false])
     }
 
+    func testOverlayUsesSystemOverlayCollectionBehavior() {
+        _ = NSApplication.shared
+        let overlay = OverlayController()
+
+        XCTAssertTrue(overlay.panel.isFloatingPanel)
+        XCTAssertTrue(overlay.panel.collectionBehavior.contains(.canJoinAllSpaces))
+        XCTAssertTrue(overlay.panel.collectionBehavior.contains(.canJoinAllApplications))
+        XCTAssertTrue(overlay.panel.collectionBehavior.contains(.fullScreenAuxiliary))
+        XCTAssertTrue(overlay.panel.collectionBehavior.contains(.stationary))
+        XCTAssertTrue(overlay.panel.collectionBehavior.contains(.ignoresCycle))
+    }
+
+    func testShortcutDoesNotClosePanelVisibleOnAnotherSpace() {
+        _ = NSApplication.shared
+        let overlay = OverlayController(isWindowOnActiveSpace: { _ in false })
+        var visibility: [Bool] = []
+        overlay.onVisibilityChanged = { visibility.append($0) }
+
+        overlay.toggle()
+        overlay.toggle()
+
+        XCTAssertTrue(overlay.isVisibleForTesting)
+        XCTAssertTrue(overlay.isPinnedForTesting)
+        XCTAssertEqual(visibility, [true])
+    }
+
     func testSettingsButtonClosesHUDBeforeOpeningSettings() {
         _ = NSApplication.shared
         let overlay = OverlayController()

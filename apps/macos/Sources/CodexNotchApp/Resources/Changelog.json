@@ -1,6 +1,15 @@
 {
   "releases": [
     {
+      "version": "0.4.25",
+      "date": "2026-07-17",
+      "title": "The notch follows your workspace",
+      "changes": [
+        "Codex Notch now remains available as you move between virtual desktops on the same display.",
+        "Pressing Control–Shift–H on another desktop now reveals the notch there instead of closing an unseen window elsewhere."
+      ]
+    },
+    {
       "version": "0.4.24",
       "date": "2026-07-16",
       "title": "A first run that earns its finish",
