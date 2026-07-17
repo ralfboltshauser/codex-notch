@@ -111,12 +111,24 @@ final class AttentionWorkflowTests: CodexNotchTestCase {
     }
 
     func testLegacyDoNotDisturbMigratesToQuietAndOutcomesDefaultOn() throws {
+        let priorSuite = "CodexNotchTests.AttentionMigrationPrior.\(UUID())"
+        let priorDefaults = try XCTUnwrap(UserDefaults(suiteName: priorSuite))
+        defer { priorDefaults.removePersistentDomain(forName: priorSuite) }
+        _ = AttentionPreferences(defaults: priorDefaults)
+
         let suite = "CodexNotchTests.AttentionMigration.\(UUID())"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         defaults.set(true, forKey: AttentionPreferences.legacyDoNotDisturbKey)
 
-        XCTAssertEqual(AttentionPreferences(defaults: defaults).mode, .quiet)
+        let preferences = AttentionPreferences(defaults: defaults)
+        XCTAssertEqual(preferences.mode, .quiet)
+        preferences.mode = .notify
+        XCTAssertEqual(
+            AttentionPreferences(defaults: defaults).mode,
+            .notify,
+            "A persisted attention choice must not be replaced by legacy migration"
+        )
         XCTAssertTrue(CompletionOutcomePreferences(defaults: defaults).isEnabled)
         XCTAssertEqual(AttentionMode.quiet.headerTitle, "Quiet")
         XCTAssertEqual(AttentionMode.quiet.headerSystemImageName, "moon.fill")

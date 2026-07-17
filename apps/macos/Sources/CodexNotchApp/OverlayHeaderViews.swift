@@ -52,8 +52,22 @@ final class HostStatusBadgeView: ClosureButton {
 }
 
 final class WeeklyUsageHeaderView: ClosureButton {
+    private static let minimumWidth: CGFloat = 50
+    private static let horizontalContentInset: CGFloat = 8
+
     private let valueLabel = NSTextField(labelWithString: "")
     private let theme: NotchTheme
+    private var preferredValueWidth: CGFloat = 0
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(
+            width: max(
+                Self.minimumWidth,
+                preferredValueWidth + (Self.horizontalContentInset * 2)
+            ),
+            height: 22
+        )
+    }
 
     init(
         state: CodexUsageState,
@@ -74,14 +88,20 @@ final class WeeklyUsageHeaderView: ClosureButton {
         valueLabel.lineBreakMode = .byClipping
         valueLabel.usesSingleLineMode = false
         valueLabel.translatesAutoresizingMaskIntoConstraints = false
-        valueLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        valueLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
         addSubview(valueLabel)
 
         NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: 22),
-            widthAnchor.constraint(greaterThanOrEqualToConstant: 50),
-            valueLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            valueLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            widthAnchor.constraint(greaterThanOrEqualToConstant: Self.minimumWidth),
+            valueLabel.leadingAnchor.constraint(
+                equalTo: leadingAnchor,
+                constant: Self.horizontalContentInset
+            ),
+            valueLabel.trailingAnchor.constraint(
+                equalTo: trailingAnchor,
+                constant: -Self.horizontalContentInset
+            ),
             valueLabel.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -0.5),
         ])
         setContentHuggingPriority(.required, for: .horizontal)
@@ -95,6 +115,7 @@ final class WeeklyUsageHeaderView: ClosureButton {
         switch state {
         case .idle:
             valueLabel.stringValue = ""
+            updatePreferredValueWidth()
             valueLabel.textColor = theme.tertiaryText
             toolTip = nil
             isHidden = true
@@ -103,6 +124,7 @@ final class WeeklyUsageHeaderView: ClosureButton {
             setAccessibilityHelp(nil)
         case .loading:
             valueLabel.stringValue = "…"
+            updatePreferredValueWidth()
             valueLabel.textColor = theme.tertiaryText
             toolTip = "Checking your Codex account limits."
             isHidden = false
@@ -111,6 +133,7 @@ final class WeeklyUsageHeaderView: ClosureButton {
             setAccessibilityHelp("Refresh account usage")
         case .unavailable(let message):
             valueLabel.stringValue = "—%"
+            updatePreferredValueWidth()
             valueLabel.textColor = .systemOrange
             toolTip = "Codex account limits unavailable — \(message). Click to retry."
             isHidden = false
@@ -131,8 +154,9 @@ final class WeeklyUsageHeaderView: ClosureButton {
         return valueLabel.frame.width
     }
     var valueIntrinsicWidthForTesting: CGFloat { valueLabel.intrinsicContentSize.width }
+    var valueRequiredWidthForTesting: CGFloat { preferredValueWidth }
     var valueFitsWithoutTruncationForTesting: Bool {
-        valueAllocatedWidthForTesting + 0.5 >= valueIntrinsicWidthForTesting
+        valueAllocatedWidthForTesting + 0.5 >= valueRequiredWidthForTesting
     }
 
     private func render(
@@ -156,11 +180,32 @@ final class WeeklyUsageHeaderView: ClosureButton {
             windows,
             labelsSingleWindow: weeklyOverview == nil
         )
+        updatePreferredValueWidth()
         toolTip = Self.toolTip(for: windows, weeklyOverview: weeklyOverview, now: now)
         isHidden = false
         setAccessibilityLabel("Codex account limits")
         setAccessibilityValue(windows.map(Self.accessibilityValue).joined(separator: "; "))
         setAccessibilityHelp("Refresh account usage")
+    }
+
+    private func updatePreferredValueWidth() {
+        let value = valueLabel.attributedStringValue
+        let string = value.string as NSString
+        var widest: CGFloat = 0
+        var location = 0
+
+        while location < string.length {
+            let remaining = NSRange(location: location, length: string.length - location)
+            let newline = string.range(of: "\n", options: [], range: remaining)
+            let lineEnd = newline.location == NSNotFound ? string.length : newline.location
+            let lineRange = NSRange(location: location, length: lineEnd - location)
+            widest = max(widest, ceil(value.attributedSubstring(from: lineRange).size().width))
+            guard newline.location != NSNotFound else { break }
+            location = NSMaxRange(newline)
+        }
+
+        preferredValueWidth = widest
+        invalidateIntrinsicContentSize()
     }
 
     private func compactValue(

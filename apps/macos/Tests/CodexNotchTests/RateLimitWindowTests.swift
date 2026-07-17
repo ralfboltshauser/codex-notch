@@ -114,7 +114,12 @@ final class RateLimitWindowTests: CodexNotchTestCase {
         host.layoutSubtreeIfNeeded()
 
         XCTAssertEqual(view.valueTextForTesting, "5h reached\n7d 54%")
-        XCTAssertTrue(view.valueFitsWithoutTruncationForTesting)
+        XCTAssertGreaterThanOrEqual(
+            view.valueAllocatedWidthForTesting + 0.5,
+            view.valueRequiredWidthForTesting,
+            "allocated \(view.valueAllocatedWidthForTesting), "
+                + "widest rendered line \(view.valueRequiredWidthForTesting)"
+        )
         XCTAssertTrue(view.toolTip?.contains("5h Codex limit reached.") == true)
         XCTAssertTrue(
             view.toolTip?.contains("You have 54% of your weekly Codex limit remaining.") == true

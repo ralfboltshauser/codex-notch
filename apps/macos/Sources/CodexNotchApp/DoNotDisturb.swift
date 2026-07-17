@@ -51,7 +51,6 @@ final class AttentionPreferences {
            defaults.bool(forKey: Self.legacyDoNotDisturbKey) {
             defaults.set(AttentionMode.quiet.rawValue, forKey: Self.modeKey)
         }
-        defaults.register(defaults: [Self.modeKey: AttentionMode.notify.rawValue])
     }
 
     var mode: AttentionMode {
