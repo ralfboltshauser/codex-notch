@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "0.5.0",
+      "date": "2026-07-17",
+      "title": "Attention, on your terms",
+      "changes": [
+        "Notify, Glance, and Quiet now provide one coherent policy for completion openings, sounds, urgent task states, and inspectable unread signals.",
+        "Local completed tasks can show a bounded one-line outcome from Codex’s final response, with a dedicated display setting and no remote model-output transfer.",
+        "Active tasks now show sanitized project and branch identity while nested subagents roll into one parent row and elevate anything that needs you.",
+        "Codex account usage now follows the actual primary and secondary window durations, labels each window, and states when a limit is reached.",
+        "Quiet mode remains visible in the open notch, and the attention selector supports keyboard, pointer, and assistive-technology use without losing focus."
+      ]
+    },
+    {
       "version": "0.4.26",
       "date": "2026-07-17",
       "title": "Back where the notch belongs",

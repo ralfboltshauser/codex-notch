@@ -240,7 +240,7 @@ export function VisualStage({
             </div>
             <div className="preference-stack">
               <div className="preference-row"><span>Completion sound</span><strong>Glass Drop <i className="waveform" /></strong></div>
-              <div className="preference-row"><span>Do Not Disturb</span><strong className="toggle is-on"><i /></strong></div>
+              <div className="preference-row"><span>Attention</span><strong>Glance</strong></div>
               <div className="preference-row"><span>Show active tasks</span><strong className="toggle is-on"><i /></strong></div>
               <div className="preference-row"><span>Reduce Motion</span><strong>Supported</strong></div>
             </div>

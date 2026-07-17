@@ -45,28 +45,33 @@ Codex Stop hooks, and selecting a task returns to the validated
 
 | 1. Delegate | 2. Get the useful signal | 3. Return exactly |
 | --- | --- | --- |
-| Start a Codex turn and leave the window. Active work stays quiet. | A completed turn opens one compact row without taking keyboard focus. | Hover the row or open the notch, choose the task, and return to its exact Codex thread. |
+| Start a Codex turn and leave the window. Active work stays quiet. | A completed turn either opens one compact outcome or increments the numbered Glance badge, according to your attention mode. | Hover the row or open the notch, choose the task, and return to its exact Codex thread. |
 
 The full notch remains available whenever you want the complete picture. It can
-show active work, tasks waiting for approval or input, recent completions,
-weekly Codex capacity, paired-host health, and available app updates without
+show active work, tasks waiting for approval or input, recent outcomes,
+Codex account windows, paired-host health, and available app updates without
 turning the menu bar into another dashboard.
 
 ## What makes it useful
 
 - **Real runtime state.** Active tasks come from Codex App Server, not process
   names, transcript scraping, or stale terminal text.
-- **One quiet interruption.** Active work never opens the notch automatically.
-  New Stop-hook events can open one compact completion row.
+- **One explicit attention policy.** Notify opens completions and plays the
+  chosen sound, Glance keeps a numbered badge, and Quiet only collects.
+- **Useful completion context.** The local Stop hook can retain one bounded,
+  deterministic line from the final response; no transcript scraping or extra
+  model call is involved.
+- **Root-task clarity.** Project and branch identify similar work while active
+  subagents roll into their parent and elevate its needs-attention state.
 - **Exact-thread handoff.** Codex Notch validates the thread UUID and constructs
   the deep link itself. Remote payloads cannot provide a URL or command.
 - **One view across machines.** The Mac UI can combine local Codex work with
   durable completion delivery and replace-only live snapshots from Ubuntu.
-- **A glanceable weekly pace.** The header shows the account-wide seven-day
-  capacity remaining, reset time, recent pace, and a deliberately conservative
-  local forecast.
+- **Honest account limits.** The header labels Codex's actual primary and
+  secondary windows by duration. Seven-day history still owns the deliberately
+  conservative local forecast.
 - **Native control.** Global shortcuts, six themes, six completion sounds, task
-  visibility, and Do Not Disturb are built into the app. macOS Focus is neither
+  visibility, and Notify/Glance/Quiet are built into the app. macOS Focus is neither
   read nor changed.
 
 ## Install
@@ -202,10 +207,11 @@ contract and [the architecture notes](docs/architecture.md) for code boundaries.
 | Hosted infrastructure | None. There is no Codex Notch account, hosted relay, or public port. |
 | Network binding | The receiver binds only to the Mac's detected Tailscale IPv4 address on TCP port `47391`. |
 | Remote authentication | Every Ubuntu host receives a separate random token stored in a user-only `0600` file. |
-| Completion payload | Thread ID, turn ID, title, source identity, and timestamp. |
-| Active snapshot | Thread ID, title, display state, and timestamp. |
-| Never sent | Working directories, prompts, transcripts, model output, Codex credentials, URLs, and commands. |
-| Weekly usage | Read locally from Codex's app-server protocol. History stores timestamps, whole remaining percentages, and reset metadata for eight weeks. |
+| Local completion record | Thread ID, turn ID, title, source identity, timestamp, and an optional bounded one-line preview of the final assistant message. It stays in the local app data. |
+| Remote completion payload | Thread ID, turn ID, title, source identity, and timestamp. |
+| Active snapshot | Thread, parent and root IDs; title and root title; display state and timestamp; sanitized project basename, branch, and optional agent labels. |
+| Never sent from Ubuntu | Working directories, prompts, transcripts, model output, Codex credentials, URLs, and commands. |
+| Account usage | Primary and secondary windows are read locally from Codex's app-server protocol. Only an exact seven-day window enters the eight-week history and forecast. |
 | Existing hooks | Installation merges with `hooks.json` and creates a backup instead of replacing unrelated hooks. |
 
 Anyone with access to an Ubuntu account can read that host's pairing token.
@@ -239,9 +245,11 @@ returns to the foreground app as soon as the notch closes.
 - **Sounds:** six short completion tones plus No Sound. Manual openings remain
   quiet.
 - **Tasks:** active task display can be disabled without stopping the in-memory
-  observer.
-- **Do Not Disturb:** finished tasks and updates remain available, but do not
-  open the notch automatically. Manual shortcuts and sounds still work.
+  observer; completion outcome lines can be shown or hidden.
+- **Attention:** Notify opens new completions and plays the chosen sound,
+  Glance adds a numbered notch badge, and Quiet only collects. Tasks that begin
+  waiting for approval or input open in Notify and Glance; update and remote
+  connection signals stay glances. macOS Focus is neither read nor changed.
 - **Updates:** Sparkle checks the signed feed every six hours, and Settings can
   request a check immediately.
 

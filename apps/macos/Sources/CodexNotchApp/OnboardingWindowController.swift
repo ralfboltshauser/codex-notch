@@ -24,7 +24,8 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
     private let pairings: PairingStore
     private let pairer: RemoteHostPairer
     private let notificationSounds: NotificationSoundPlayer
-    private let doNotDisturbPreferences: DoNotDisturbPreferences
+    private let attentionPreferences: AttentionPreferences
+    private let completionOutcomePreferences: CompletionOutcomePreferences
     private let isHookInstalled: () -> Bool
     private let isHookTrusted: () -> Bool
     private let installHook: () throws -> Void
@@ -39,7 +40,8 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
     private weak var remoteSummaryLabel: NSTextField?
     private weak var remoteRefreshButton: ClosureButton?
     private weak var checkForUpdatesButton: ClosureButton?
-    private weak var doNotDisturbButton: ClosureButton?
+    private weak var completionOutcomeButton: ClosureButton?
+    private var attentionModeButtons: [AttentionMode: ClosureButton] = [:]
     private var working = false
     private var contentTransitionID = 0
     private var selectedPage: SettingsPage = .connections
@@ -62,7 +64,10 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
     var onTryNotch: (() -> Void)?
 
     var checkForUpdatesButtonForTesting: NSButton? { checkForUpdatesButton }
-    var doNotDisturbButtonForTesting: NSButton? { doNotDisturbButton }
+    var completionOutcomeButtonForTesting: NSButton? { completionOutcomeButton }
+    var attentionModeButtonsForTesting: [AttentionMode: NSButton] {
+        attentionModeButtons.mapValues { $0 as NSButton }
+    }
     var replayOnboardingButtonForTesting: NSButton? { replayOnboardingButton }
     var onboardingStepForTesting: OnboardingStep? { onboardingFlow?.stepForTesting }
     var onboardingPrimaryButtonForTesting: NSButton? {
@@ -136,7 +141,8 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         pairings: PairingStore,
         pairer: RemoteHostPairer,
         notificationSounds: NotificationSoundPlayer = NotificationSoundPlayer(),
-        doNotDisturbPreferences: DoNotDisturbPreferences = .shared,
+        attentionPreferences: AttentionPreferences = .shared,
+        completionOutcomePreferences: CompletionOutcomePreferences = .shared,
         isHookInstalled: @escaping () -> Bool = { CodexHookInstaller().isInstalled },
         isHookTrusted: @escaping () -> Bool = { CodexHookInstaller().isTrusted },
         installHook: @escaping () throws -> Void = { try CodexHookInstaller().install() },
@@ -149,7 +155,8 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
         self.pairings = pairings
         self.pairer = pairer
         self.notificationSounds = notificationSounds
-        self.doNotDisturbPreferences = doNotDisturbPreferences
+        self.attentionPreferences = attentionPreferences
+        self.completionOutcomePreferences = completionOutcomePreferences
         self.isHookInstalled = isHookInstalled
         self.isHookTrusted = isHookTrusted
         self.installHook = installHook
@@ -265,6 +272,7 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
 
     private func resetContent() {
         taskLayoutViews.removeAll()
+        attentionModeButtons.removeAll()
         changelogCards.removeAll()
         changelogScrollView = nil
         content.subviews.forEach { $0.removeFromSuperview() }
@@ -295,23 +303,29 @@ final class OnboardingWindowController: NSWindowController, NSTextFieldDelegate,
             header: settingsHeader(selected: .tasks),
             theme: ThemeStore.shared.activeTheme,
             showsActiveTasks: ActiveTaskPreferences.shared.isVisible,
-            doNotDisturbEnabled: doNotDisturbPreferences.isEnabled,
+            showsCompletionOutcomes: completionOutcomePreferences.isEnabled,
+            attentionMode: attentionPreferences.mode,
             versionDescription: Self.versionDescription(),
             toggleActiveTasks: { [weak self] in
                 _ = ActiveTaskPreferences.shared.toggle()
                 self?.buildTasks()
             },
-            toggleDoNotDisturb: { [weak self] in
+            toggleCompletionOutcomes: { [weak self] in
                 guard let self else { return }
-                _ = self.doNotDisturbPreferences.toggle()
+                _ = self.completionOutcomePreferences.toggle()
                 self.buildTasks()
+            },
+            setAttentionMode: { [weak self] mode in
+                guard let self else { return }
+                self.attentionPreferences.mode = mode
             },
             checkForUpdates: { [weak self] in self?.onCheckForUpdates?() },
             close: { [weak self] in self?.close() }
         )
         SettingsViewFactory.install(page, in: content)
         taskLayoutViews = page.layoutViews
-        doNotDisturbButton = page.doNotDisturbButton
+        completionOutcomeButton = page.completionOutcomeButton
+        attentionModeButtons = page.attentionModeButtons
         checkForUpdatesButton = page.checkForUpdatesButton
     }
     private func buildAppearance() {

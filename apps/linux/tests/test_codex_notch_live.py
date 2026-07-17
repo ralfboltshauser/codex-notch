@@ -35,7 +35,7 @@ class LinuxLiveObserverTests(unittest.TestCase):
         self.assertNotIn("private", encoded)
         self.assertNotIn("secret", encoded)
 
-    def test_snapshot_excludes_idle_threads_and_subagents(self):
+    def test_snapshot_includes_active_subagents_but_not_idle_root_rows(self):
         active_child = {
             "id": "019f5d4f-3a8d-76c0-8c2d-19451190e028",
             "name": "Child",
@@ -48,7 +48,12 @@ class LinuxLiveObserverTests(unittest.TestCase):
             "status": {"type": "idle"},
             "parentThreadId": None,
         }
-        self.assertEqual(live.snapshot_from_rows([active_child, idle_root])["tasks"], [])
+        tasks = live.snapshot_from_rows([active_child, idle_root])["tasks"]
+        self.assertEqual(len(tasks), 1)
+        self.assertEqual(tasks[0]["title"], "Child")
+        self.assertEqual(tasks[0]["parent_thread_id"], idle_root["id"])
+        self.assertEqual(tasks[0]["root_thread_id"], idle_root["id"])
+        self.assertEqual(tasks[0]["root_title"], "Idle")
 
 
 if __name__ == "__main__":

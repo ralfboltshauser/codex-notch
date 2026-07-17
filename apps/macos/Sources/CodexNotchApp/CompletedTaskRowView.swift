@@ -8,6 +8,7 @@ final class TaskRowView: NSView {
     private let shouldReduceMotion: () -> Bool
     private let dismissButton: ClosureButton
     private let numberBadge: NumberBadgeView
+    private let outcomeLabel: NSTextField?
     private let relativeTimeLabel: NSTextField
     private let theme: NotchTheme
     private var tracking: NSTrackingArea?
@@ -23,6 +24,7 @@ final class TaskRowView: NSView {
         theme: NotchTheme,
         now: Date,
         isTriggered: Bool,
+        showsOutcome: Bool = true,
         shouldReduceMotion: @escaping () -> Bool,
         open: @escaping () -> Void,
         dismiss: @escaping () -> Void
@@ -33,6 +35,9 @@ final class TaskRowView: NSView {
         self.isTriggered = isTriggered
         openHandler = open
         dismissButton = ClosureButton(handler: dismiss)
+        outcomeLabel = showsOutcome
+            ? task.outcome.map { NSTextField(labelWithString: $0) }
+            : nil
         relativeTimeLabel = NSTextField(
             labelWithString: CompletionRelativeTime.text(since: task.receivedAt, now: now)
         )
@@ -59,6 +64,13 @@ final class TaskRowView: NSView {
         title.maximumNumberOfLines = 1
         title.translatesAutoresizingMaskIntoConstraints = false
         title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        outcomeLabel?.font = theme.font(ofSize: 10.5, weight: .regular)
+        outcomeLabel?.textColor = theme.secondaryText
+        outcomeLabel?.lineBreakMode = .byTruncatingTail
+        outcomeLabel?.maximumNumberOfLines = 1
+        outcomeLabel?.translatesAutoresizingMaskIntoConstraints = false
+        outcomeLabel?.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         let source = NSTextField(labelWithString: task.sourceLabel)
         source.font = theme.font(ofSize: 10.5, weight: .medium)
@@ -93,36 +105,56 @@ final class TaskRowView: NSView {
         dismissButton.alphaValue = 0
         dismissButton.translatesAutoresizingMaskIntoConstraints = false
 
-        [numberBadge, title, source, relativeTimeLabel, shortcut, dismissButton]
-            .forEach(addSubview)
-        NSLayoutConstraint.activate([
+        var rowViews: [NSView] = [numberBadge, title]
+        if let outcomeLabel { rowViews.append(outcomeLabel) }
+        rowViews.append(contentsOf: [source, relativeTimeLabel, shortcut, dismissButton])
+        rowViews.forEach(addSubview)
+        var constraints = [
             heightAnchor.constraint(equalToConstant: 46),
             numberBadge.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
             numberBadge.centerYAnchor.constraint(equalTo: centerYAnchor),
             title.leadingAnchor.constraint(equalTo: numberBadge.trailingAnchor, constant: 11),
-            title.centerYAnchor.constraint(equalTo: centerYAnchor),
             source.leadingAnchor.constraint(
                 greaterThanOrEqualTo: title.trailingAnchor,
                 constant: 14
             ),
             source.widthAnchor.constraint(lessThanOrEqualToConstant: 120),
-            source.centerYAnchor.constraint(equalTo: centerYAnchor),
             relativeTimeLabel.leadingAnchor.constraint(
                 equalTo: source.trailingAnchor,
                 constant: 10
             ),
-            relativeTimeLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
             shortcut.leadingAnchor.constraint(
                 equalTo: relativeTimeLabel.trailingAnchor,
                 constant: 12
             ),
-            shortcut.centerYAnchor.constraint(equalTo: centerYAnchor),
             dismissButton.leadingAnchor.constraint(equalTo: shortcut.trailingAnchor, constant: 8),
             dismissButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
             dismissButton.centerYAnchor.constraint(equalTo: centerYAnchor),
             dismissButton.widthAnchor.constraint(equalToConstant: 24),
             dismissButton.heightAnchor.constraint(equalToConstant: 24),
-        ])
+        ]
+        if let outcomeLabel {
+            constraints.append(contentsOf: [
+                title.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -7),
+                source.centerYAnchor.constraint(equalTo: title.centerYAnchor),
+                relativeTimeLabel.centerYAnchor.constraint(equalTo: title.centerYAnchor),
+                shortcut.centerYAnchor.constraint(equalTo: title.centerYAnchor),
+                outcomeLabel.leadingAnchor.constraint(equalTo: title.leadingAnchor),
+                outcomeLabel.topAnchor.constraint(equalTo: title.bottomAnchor, constant: -1),
+                outcomeLabel.trailingAnchor.constraint(
+                    lessThanOrEqualTo: dismissButton.leadingAnchor,
+                    constant: -8
+                ),
+            ])
+        } else {
+            constraints.append(contentsOf: [
+                title.centerYAnchor.constraint(equalTo: centerYAnchor),
+                source.centerYAnchor.constraint(equalTo: centerYAnchor),
+                relativeTimeLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+                shortcut.centerYAnchor.constraint(equalTo: centerYAnchor),
+            ])
+        }
+        NSLayoutConstraint.activate(constraints)
         updateAccessibilityValue()
     }
 
@@ -162,10 +194,17 @@ final class TaskRowView: NSView {
     private func updateAccessibilityValue() {
         setAccessibilityLabel(task.title)
         let age = relativeTimeLabel.stringValue
-        setAccessibilityValue(isTriggered ? "Triggered this opening. \(age)." : age)
+        let outcome = task.outcome.map { value in
+            let needsPunctuation = value.last.map { !".!?".contains($0) } ?? false
+            return "Outcome: \(value)\(needsPunctuation ? "." : "") "
+        } ?? ""
+        setAccessibilityValue(
+            outcome + (isTriggered ? "Triggered this opening. \(age)." : age)
+        )
     }
 
     var badgeTextForTesting: String { numberBadge.textForTesting }
+    var outcomeTextForTesting: String? { outcomeLabel?.stringValue }
     var relativeTimeTextForTesting: String { relativeTimeLabel.stringValue }
     var isTriggeredForTesting: Bool { isTriggered }
     var hasPromotionAnimationForTesting: Bool {

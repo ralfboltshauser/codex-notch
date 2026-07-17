@@ -70,6 +70,9 @@ final class WeeklyUsageHeaderView: ClosureButton {
 
         valueLabel.font = .monospacedDigitSystemFont(ofSize: 10.5, weight: .semibold)
         valueLabel.alignment = .center
+        valueLabel.maximumNumberOfLines = 2
+        valueLabel.lineBreakMode = .byClipping
+        valueLabel.usesSingleLineMode = false
         valueLabel.translatesAutoresizingMaskIntoConstraints = false
         valueLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         addSubview(valueLabel)
@@ -95,40 +98,29 @@ final class WeeklyUsageHeaderView: ClosureButton {
             valueLabel.textColor = theme.tertiaryText
             toolTip = nil
             isHidden = true
-            setAccessibilityLabel("Weekly Codex usage unavailable")
+            setAccessibilityLabel("Codex account usage unavailable")
             setAccessibilityValue(nil)
             setAccessibilityHelp(nil)
         case .loading:
             valueLabel.stringValue = "…"
             valueLabel.textColor = theme.tertiaryText
-            toolTip = "Checking your weekly Codex limit."
+            toolTip = "Checking your Codex account limits."
             isHidden = false
-            setAccessibilityLabel("Checking weekly Codex account limit")
+            setAccessibilityLabel("Checking Codex account limits")
             setAccessibilityValue(nil)
-            setAccessibilityHelp("Refresh weekly usage")
+            setAccessibilityHelp("Refresh account usage")
         case .unavailable(let message):
             valueLabel.stringValue = "—%"
             valueLabel.textColor = .systemOrange
-            toolTip = "Weekly account limit unavailable — \(message). Click to retry."
+            toolTip = "Codex account limits unavailable — \(message). Click to retry."
             isHidden = false
-            setAccessibilityLabel("Weekly Codex account limit unavailable")
+            setAccessibilityLabel("Codex account limits unavailable")
             setAccessibilityValue(message)
-            setAccessibilityHelp("Retry reading weekly usage")
+            setAccessibilityHelp("Retry reading account usage")
         case .available(let overview):
-            let remaining = overview.limit.remainingPercent
-            valueLabel.stringValue = "\(remaining)%"
-            if remaining == 0 {
-                valueLabel.textColor = .systemRed
-            } else if remaining <= 20 {
-                valueLabel.textColor = .systemOrange
-            } else {
-                valueLabel.textColor = theme.accent
-            }
-            toolTip = Self.toolTip(for: overview, now: now)
-            isHidden = false
-            setAccessibilityLabel("Weekly Codex account limit")
-            setAccessibilityValue("\(remaining) percent remaining")
-            setAccessibilityHelp("Refresh weekly usage")
+            render(overview.windows, weeklyOverview: overview, now: now)
+        case .availableWindows(let windows):
+            render(windows, weeklyOverview: nil, now: now)
         }
     }
 
@@ -143,22 +135,136 @@ final class WeeklyUsageHeaderView: ClosureButton {
         valueAllocatedWidthForTesting + 0.5 >= valueIntrinsicWidthForTesting
     }
 
-    private static func toolTip(for overview: CodexUsageOverview, now: Date) -> String {
-        var lines = [
-            "You have \(overview.limit.remainingPercent)% of your weekly Codex limit remaining.",
-            "Account-wide, not task context.",
-            forecastText(overview.forecast, now: now),
-        ]
-        if let resetsAt = overview.limit.resetsAt {
-            lines.append("Resets \(shortDate(resetsAt))")
+    private func render(
+        _ windows: [CodexRateLimitWindow],
+        weeklyOverview: CodexUsageOverview?,
+        now: Date
+    ) {
+        guard !windows.isEmpty else {
+            update(.unavailable(message: "Codex returned no account usage windows"), now: now)
+            return
         }
-        if let trend = overview.recentTrend {
+
+        if windows.contains(where: \.isReached) {
+            valueLabel.textColor = .systemRed
+        } else if windows.contains(where: { $0.remainingPercent <= 20 }) {
+            valueLabel.textColor = .systemOrange
+        } else {
+            valueLabel.textColor = theme.accent
+        }
+        valueLabel.attributedStringValue = compactValue(
+            windows,
+            labelsSingleWindow: weeklyOverview == nil
+        )
+        toolTip = Self.toolTip(for: windows, weeklyOverview: weeklyOverview, now: now)
+        isHidden = false
+        setAccessibilityLabel("Codex account limits")
+        setAccessibilityValue(windows.map(Self.accessibilityValue).joined(separator: "; "))
+        setAccessibilityHelp("Refresh account usage")
+    }
+
+    private func compactValue(
+        _ windows: [CodexRateLimitWindow],
+        labelsSingleWindow: Bool
+    ) -> NSAttributedString {
+        let multiple = windows.count > 1
+        let font = NSFont.monospacedSystemFont(
+            ofSize: multiple ? 8 : 10.5,
+            weight: .semibold
+        )
+        let result = NSMutableAttributedString(string: "")
+
+        for (index, window) in windows.prefix(2).enumerated() {
+            if index > 0 {
+                result.append(NSAttributedString(string: "\n", attributes: [.font: font]))
+            }
+            if multiple || labelsSingleWindow {
+                result.append(NSAttributedString(
+                    string: "\(window.durationLabel) ",
+                    attributes: [.font: font, .foregroundColor: theme.tertiaryText]
+                ))
+            }
+            result.append(NSAttributedString(
+                string: window.isReached ? "reached" : "\(window.remainingPercent)%",
+                attributes: [.font: font, .foregroundColor: statusColor(window)]
+            ))
+        }
+
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        paragraph.lineBreakMode = .byClipping
+        if multiple {
+            paragraph.minimumLineHeight = 9
+            paragraph.maximumLineHeight = 9
+        }
+        result.addAttribute(
+            .paragraphStyle,
+            value: paragraph,
+            range: NSRange(location: 0, length: result.length)
+        )
+        return result
+    }
+
+    private func statusColor(_ window: CodexRateLimitWindow) -> NSColor {
+        if window.isReached { return .systemRed }
+        if window.remainingPercent <= 20 { return .systemOrange }
+        return theme.accent
+    }
+
+    private static func accessibilityValue(_ window: CodexRateLimitWindow) -> String {
+        let status = window.isReached
+            ? "limit reached"
+            : "\(window.remainingPercent) percent remaining"
+        return "\(spokenDuration(window.durationMinutes)): \(status)"
+    }
+
+    private static func toolTip(
+        for windows: [CodexRateLimitWindow],
+        weeklyOverview: CodexUsageOverview?,
+        now: Date
+    ) -> String {
+        var lines: [String] = []
+        for window in windows {
+            if window.isWeekly {
+                lines.append(window.isReached
+                    ? "Weekly Codex limit reached."
+                    : "You have \(window.remainingPercent)% of your weekly Codex limit remaining.")
+            } else {
+                lines.append(window.isReached
+                    ? "\(window.durationLabel) Codex limit reached."
+                    : "\(window.durationLabel): \(window.remainingPercent)% remaining.")
+            }
+            if let resetsAt = window.resetsAt {
+                lines.append("\(window.durationLabel) resets \(shortDate(resetsAt))")
+            }
+        }
+        lines.append("Account-wide, not task context.")
+        if let weeklyOverview {
+            if case .depleted = weeklyOverview.forecast {
+                // The reached state is already stated beside the seven-day window.
+            } else {
+                lines.append(forecastText(weeklyOverview.forecast, now: now))
+            }
+        }
+        if let trend = weeklyOverview?.recentTrend {
             let hours = max(1, Int((trend.observedFor / 3_600).rounded()))
             lines.append("Recent change: \(trend.usedPercent)% used over \(hours)h")
         }
         lines.append("")
         lines.append("Click to refresh.")
         return lines.joined(separator: "\n")
+    }
+
+    private static func spokenDuration(_ minutes: Int) -> String {
+        if minutes.isMultiple(of: 24 * 60) {
+            let days = minutes / (24 * 60)
+            return "\(days) \(days == 1 ? "day" : "days")"
+        }
+        if minutes.isMultiple(of: 60) {
+            let hours = minutes / 60
+            return "\(hours) \(hours == 1 ? "hour" : "hours")"
+        }
+        return "\(minutes) minutes"
     }
 
     private static func forecastText(_ forecast: CodexUsageForecast, now: Date) -> String {

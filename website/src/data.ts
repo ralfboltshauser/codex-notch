@@ -1,11 +1,11 @@
 export const RELEASE = {
-  version: "0.4.26",
+  version: "0.5.0",
   macos: "macOS 13+",
   architecture: "Apple silicon",
   download:
-    "https://github.com/ralfboltshauser/codex-notch/releases/download/v0.4.26/CodexNotch-0.4.26.zip",
+    "https://github.com/ralfboltshauser/codex-notch/releases/download/v0.5.0/CodexNotch-0.5.0.zip",
   release:
-    "https://github.com/ralfboltshauser/codex-notch/releases/tag/v0.4.26",
+    "https://github.com/ralfboltshauser/codex-notch/releases/tag/v0.5.0",
   repository: "https://github.com/ralfboltshauser/codex-notch",
 } as const;
 
@@ -40,16 +40,16 @@ export const CHAPTERS: Chapter[] = [
     body:
       "Open the notch whenever you want a factual view of what Codex is doing. It is not a guess based on a process name or stale transcript.",
     note:
-      "Active tasks stay quiet. They never open the notch on their own.",
+      "Running stays quiet. A task that begins waiting for you can ask for attention.",
   },
   {
     id: "signal",
     number: "02",
     eyebrow: "The useful interruption",
-    title: "It appears at exactly the useful moment.",
+    title: "It tells you enough—or waits quietly.",
     body:
-      "When a turn finishes, one compact row opens at the top of your screen without taking keyboard focus.",
-    note: "One task. Five seconds. No window hunting.",
+      "Notify opens one compact outcome without taking focus. Glance leaves a numbered signal. Quiet simply collects.",
+    note: "One attention policy for opening, sound, and unread state.",
   },
   {
     id: "return",
@@ -72,11 +72,11 @@ export const CHAPTERS: Chapter[] = [
   {
     id: "usage",
     number: "05",
-    eyebrow: "Weekly pace",
-    title: "Your week, at a glance. Not another dashboard.",
+    eyebrow: "Account limits",
+    title: "The windows Codex actually gives you.",
     body:
-      "See the account-wide seven-day capacity remaining, reset time, recent pace, and a restrained local forecast right in the header.",
-    note: "Whole percentages in, whole percentages out. No invented precision.",
+      "See primary and secondary windows labeled by their real duration. Seven-day history still owns the restrained local forecast.",
+    note: "Whole percentages in, whole percentages out. No invented windows.",
   },
   {
     id: "trust",
@@ -86,7 +86,7 @@ export const CHAPTERS: Chapter[] = [
     body:
       "Codex Notch keeps only what it needs to show a task and bring you back. Your work stays where it belongs.",
     note:
-      "No prompts. No transcripts. No model output. No Codex credentials in task payloads.",
+      "No prompts or transcripts. Local outcome lines stay on the Mac; Ubuntu never sends model output or Codex credentials.",
   },
   {
     id: "personal",
@@ -94,7 +94,7 @@ export const CHAPTERS: Chapter[] = [
     eyebrow: "Native, quiet, yours",
     title: "A small surface with a point of view.",
     body:
-      "Preview authored palettes on the real open notch, choose a completion tone, hide active tasks, or turn on Do Not Disturb without changing macOS Focus.",
+      "Preview authored palettes on the real open notch, choose a completion tone, hide active tasks, or pick Notify, Glance, or Quiet without changing macOS Focus.",
     note: "Hover a palette below to preview it live.",
   },
 ];

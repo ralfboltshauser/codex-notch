@@ -4,6 +4,8 @@ struct OverlayContentConfiguration {
     let geometry: IslandGeometry
     let theme: NotchTheme
     let completedTasks: [CompletedTask]
+    let showsCompletionOutcomes: Bool
+    let attentionMode: AttentionMode
     let displayedActiveTasks: [ActiveTask]
     let totalActiveTaskCount: Int
     let showsActiveTasks: Bool
@@ -63,16 +65,20 @@ enum OverlayContentBuilder {
         root.notchCenterOffset = geometry.notchCenterOffset
 
         let codexIcon = NSImageView(image: NSImage(
-            systemSymbolName: "checkmark.circle.fill",
-            accessibilityDescription: "Codex tasks ready"
+            systemSymbolName: configuration.attentionMode.headerSystemImageName,
+            accessibilityDescription: configuration.attentionMode.headerAccessibilityDescription
         ) ?? NSImage())
         codexIcon.contentTintColor = theme.accent
+        codexIcon.toolTip = configuration.attentionMode == .quiet
+            ? "Quiet mode · completions are collected without opening or sound"
+            : nil
         codexIcon.translatesAutoresizingMaskIntoConstraints = false
 
-        let heading = NSTextField(labelWithString: "Codex")
+        let heading = NSTextField(labelWithString: configuration.attentionMode.headerTitle)
         heading.font = theme.font(ofSize: 13, weight: .semibold)
         heading.textColor = theme.primaryText
         heading.translatesAutoresizingMaskIntoConstraints = false
+        heading.toolTip = codexIcon.toolTip
 
         let toggleHint = NSTextField(labelWithString: GlobalHotKeys.toggleShortcutLabel())
         toggleHint.font = .monospacedSystemFont(ofSize: 10.5, weight: .medium)
@@ -258,6 +264,7 @@ enum OverlayContentBuilder {
                 theme: theme,
                 now: configuration.now,
                 isTriggered: task.eventID == configuration.triggeringEventID,
+                showsOutcome: configuration.showsCompletionOutcomes,
                 shouldReduceMotion: configuration.shouldReduceMotion,
                 open: { actions.openCompletedTask(task) },
                 dismiss: { actions.dismissTask(shortcutIndex) }
@@ -315,21 +322,20 @@ enum OverlayContentBuilder {
             promotionRevealViews: promotionRevealViews
         )
 
-        let activeHeight = configuration.displayedActiveTasks.isEmpty
+        let activeHeight: CGFloat = configuration.displayedActiveTasks.isEmpty
             ? 0
-            : 22 + configuration.displayedActiveTasks.count * 48
+            : 22 + CGFloat(configuration.displayedActiveTasks.count)
+                * (ActiveTaskRowView.rowHeight + stack.spacing)
                 + (configuration.totalActiveTaskCount
                     > configuration.displayedActiveTasks.count ? 24 : 0)
-        let completedSectionHeight = !configuration.completedTasks.isEmpty
+        let completedSectionHeight: CGFloat = !configuration.completedTasks.isEmpty
             && !configuration.displayedActiveTasks.isEmpty ? 20 : 0
         let contentHeight: CGFloat = configuration.completedTasks.isEmpty
             && configuration.displayedActiveTasks.isEmpty
             ? 168
-            : 62 + CGFloat(
-                configuration.completedTasks.count * 48
-                    + activeHeight
-                    + completedSectionHeight
-            )
+            : 62 + CGFloat(configuration.completedTasks.count * 48)
+                + activeHeight
+                + completedSectionHeight
         let size = NSSize(
             width: geometry.windowWidth,
             height: contentHeight - reclaimedTopPadding

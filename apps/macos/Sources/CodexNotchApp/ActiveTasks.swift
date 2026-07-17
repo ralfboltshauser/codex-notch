@@ -8,8 +8,75 @@ struct ActiveTask: Equatable {
     let sourceLabel: String
     let state: ActiveTaskState
     let updatedAt: Date
+    let parentThreadID: String?
+    let rootThreadID: String?
+    let rootTitle: String?
+    let projectLabel: String?
+    let branch: String?
+    let agentNickname: String?
+    let agentRole: String?
+    let subagentCount: Int
+    let runningSubagentCount: Int
+    let attentionSubagentCount: Int
+
+    init(
+        threadID: String,
+        title: String,
+        sourceID: String,
+        sourceLabel: String,
+        state: ActiveTaskState,
+        updatedAt: Date,
+        parentThreadID: String? = nil,
+        rootThreadID: String? = nil,
+        rootTitle: String? = nil,
+        projectLabel: String? = nil,
+        branch: String? = nil,
+        agentNickname: String? = nil,
+        agentRole: String? = nil,
+        subagentCount: Int = 0,
+        runningSubagentCount: Int = 0,
+        attentionSubagentCount: Int = 0
+    ) {
+        self.threadID = threadID
+        self.title = title
+        self.sourceID = sourceID
+        self.sourceLabel = sourceLabel
+        self.state = state
+        self.updatedAt = updatedAt
+        self.parentThreadID = parentThreadID
+        self.rootThreadID = rootThreadID
+        self.rootTitle = rootTitle
+        self.projectLabel = projectLabel
+        self.branch = branch
+        self.agentNickname = agentNickname
+        self.agentRole = agentRole
+        self.subagentCount = subagentCount
+        self.runningSubagentCount = runningSubagentCount
+        self.attentionSubagentCount = attentionSubagentCount
+    }
 
     var url: URL? { CompletedTask.codexURL(threadID: threadID) }
+
+    func replacingState(_ state: ActiveTaskState) -> ActiveTask {
+        ActiveTask(
+            threadID: threadID,
+            title: title,
+            sourceID: sourceID,
+            sourceLabel: sourceLabel,
+            state: state,
+            updatedAt: updatedAt,
+            parentThreadID: parentThreadID,
+            rootThreadID: rootThreadID,
+            rootTitle: rootTitle,
+            projectLabel: projectLabel,
+            branch: branch,
+            agentNickname: agentNickname,
+            agentRole: agentRole,
+            subagentCount: subagentCount,
+            runningSubagentCount: runningSubagentCount,
+            attentionSubagentCount: attentionSubagentCount
+        )
+    }
 }
 
 final class ActiveTaskPreferences {
@@ -90,7 +157,14 @@ final class ActiveTaskStore {
                 sourceID: sourceID,
                 sourceLabel: sourceLabel,
                 state: event.state,
-                updatedAt: event.updatedAt
+                updatedAt: event.updatedAt,
+                parentThreadID: event.parentThreadID?.lowercased(),
+                rootThreadID: event.rootThreadID?.lowercased(),
+                rootTitle: event.rootTitle.map { CompletionEvent.cleanTitle($0) },
+                projectLabel: event.projectLabel,
+                branch: event.branch,
+                agentNickname: event.agentNickname,
+                agentRole: event.agentRole
             )
         }
         sources[sourceID] = SourceState(
@@ -130,22 +204,58 @@ final class ActiveTaskStore {
         sources.values.flatMap { source -> [ActiveTask] in
             let age = timestamp.timeIntervalSince(source.receivedAt)
             guard age < Self.removeAfter else { return [] }
-            if age >= Self.unavailableAfter {
-                return source.tasks.map {
-                    ActiveTask(
-                        threadID: $0.threadID,
-                        title: $0.title,
-                        sourceID: $0.sourceID,
-                        sourceLabel: $0.sourceLabel,
-                        state: .unavailable,
-                        updatedAt: $0.updatedAt
-                    )
-                }
-            }
-            return source.tasks
+            let tasks = age >= Self.unavailableAfter
+                ? source.tasks.map { $0.replacingState(.unavailable) }
+                : source.tasks
+            return rollUp(tasks)
         }.sorted {
             if $0.updatedAt != $1.updatedAt { return $0.updatedAt > $1.updatedAt }
             return $0.threadID < $1.threadID
+        }
+    }
+
+    private func rollUp(_ tasks: [ActiveTask]) -> [ActiveTask] {
+        Dictionary(grouping: tasks) { $0.rootThreadID ?? $0.threadID }.map {
+            rootThreadID, members in
+            let ordered = members.sorted {
+                if $0.updatedAt != $1.updatedAt { return $0.updatedAt > $1.updatedAt }
+                return $0.threadID < $1.threadID
+            }
+            guard let latest = ordered.first else { preconditionFailure("Empty task group") }
+            let root = members.first { $0.threadID == rootThreadID }
+            let children = members.filter { $0.threadID != rootThreadID }
+            let title = root?.title
+                ?? ordered.compactMap(\.rootTitle).first
+                ?? latest.title
+            let state: ActiveTaskState
+            if members.contains(where: { $0.state == .waitingForApproval }) {
+                state = .waitingForApproval
+            } else if members.contains(where: { $0.state == .waitingForInput }) {
+                state = .waitingForInput
+            } else if members.contains(where: { $0.state == .running }) {
+                state = .running
+            } else {
+                state = .unavailable
+            }
+            return ActiveTask(
+                threadID: rootThreadID,
+                title: title,
+                sourceID: latest.sourceID,
+                sourceLabel: latest.sourceLabel,
+                state: state,
+                updatedAt: latest.updatedAt,
+                rootThreadID: rootThreadID,
+                projectLabel: root?.projectLabel
+                    ?? ordered.compactMap(\.projectLabel).first,
+                branch: root?.branch ?? ordered.compactMap(\.branch).first,
+                agentNickname: root?.agentNickname,
+                agentRole: root?.agentRole,
+                subagentCount: children.count,
+                runningSubagentCount: children.filter { $0.state == .running }.count,
+                attentionSubagentCount: children.filter {
+                    $0.state == .waitingForApproval || $0.state == .waitingForInput
+                }.count
+            )
         }
     }
 

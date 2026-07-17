@@ -4,11 +4,13 @@ public struct CodexStopHookInput: Decodable {
     public let sessionID: String
     public let turnID: String?
     public let hookEventName: String?
+    public let lastAssistantMessage: String?
 
     enum CodingKeys: String, CodingKey {
         case sessionID = "session_id"
         case turnID = "turn_id"
         case hookEventName = "hook_event_name"
+        case lastAssistantMessage = "last_assistant_message"
     }
 }
 
@@ -29,7 +31,8 @@ public enum LocalHookRunner {
                 title: CompletionEvent.cleanTitle(lookupTitle(sessionID: canonicalThreadID)),
                 sourceID: "local",
                 sourceLabel: "This Mac",
-                completedAt: Date()
+                completedAt: Date(),
+                outcome: CompletionOutcomeFormatter.format(hook.lastAssistantMessage)
             )
             guard event.isValid else { return 0 }
             try write(event)

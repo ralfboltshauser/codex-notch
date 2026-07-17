@@ -5,13 +5,14 @@ struct CompletedTask: Codable, Equatable {
     let eventID: String
     let threadID: String
     let title: String
+    let outcome: String?
     let sourceID: String
     let sourceLabel: String
     let url: URL
     let receivedAt: Date
 
     enum CodingKeys: String, CodingKey {
-        case eventID, threadID, title, sourceID, sourceLabel, url, receivedAt
+        case eventID, threadID, title, outcome, sourceID, sourceLabel, url, receivedAt
     }
 
     init(
@@ -21,11 +22,13 @@ struct CompletedTask: Codable, Equatable {
         sourceID: String = "local",
         sourceLabel: String = "This Mac",
         url: URL,
-        receivedAt: Date
+        receivedAt: Date,
+        outcome: String? = nil
     ) {
         self.eventID = eventID
         self.threadID = threadID ?? url.lastPathComponent
         self.title = title
+        self.outcome = outcome.flatMap(CompletionOutcomeFormatter.format)
         self.sourceID = sourceID
         self.sourceLabel = sourceLabel
         self.url = url
@@ -42,7 +45,8 @@ struct CompletedTask: Codable, Equatable {
             sourceID: event.sourceID,
             sourceLabel: event.sourceLabel,
             url: url,
-            receivedAt: event.completedAt
+            receivedAt: event.completedAt,
+            outcome: event.outcome
         )
     }
 
@@ -51,6 +55,8 @@ struct CompletedTask: Codable, Equatable {
         eventID = try values.decode(String.self, forKey: .eventID)
         threadID = try values.decode(String.self, forKey: .threadID)
         title = try values.decode(String.self, forKey: .title)
+        outcome = try values.decodeIfPresent(String.self, forKey: .outcome)
+            .flatMap(CompletionOutcomeFormatter.format)
         sourceID = try values.decodeIfPresent(String.self, forKey: .sourceID) ?? "local"
         sourceLabel = try values.decodeIfPresent(String.self, forKey: .sourceLabel) ?? "This Mac"
         url = try values.decode(URL.self, forKey: .url)

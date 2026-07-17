@@ -43,7 +43,7 @@ const TOUCH_CHAPTER_COPY: Partial<
   },
   personal: {
     body:
-      "Preview authored palettes on the real open notch, choose a completion tone, hide active tasks, or turn on Do Not Disturb without changing macOS Focus.",
+      "Preview authored palettes on the real open notch, choose a completion tone, hide active tasks, or pick Notify, Glance, or Quiet without changing macOS Focus.",
     note: "Tap a palette below to preview it live.",
   },
 };

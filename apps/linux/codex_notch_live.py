@@ -158,28 +158,91 @@ def iso_time(timestamp=None):
     return value.isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
+def clean_optional(value, maximum):
+    cleaned = " ".join(str(value or "").split())
+    return cleaned[:maximum] or None
+
+
+def canonical_thread_id(value):
+    try:
+        return str(uuid.UUID(str(value)))
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
+def project_label(cwd):
+    if not isinstance(cwd, str) or not cwd:
+        return None
+    return clean_optional(os.path.basename(os.path.normpath(cwd)), 80)
+
+
+def thread_nodes(rows):
+    nodes = {}
+    for row in rows:
+        thread_id = canonical_thread_id(row.get("id"))
+        if not thread_id or thread_id in nodes:
+            continue
+        parent_id = canonical_thread_id(row.get("parentThreadId"))
+        nodes[thread_id] = {
+            "id": thread_id,
+            "parent_id": parent_id,
+            "title": clean_optional(row.get("name") or "Codex task running", 180),
+            "row": row,
+        }
+    return nodes
+
+
+def root_thread_id(node, nodes):
+    current_id = node["id"]
+    seen = {current_id}
+    while nodes.get(current_id, {}).get("parent_id"):
+        parent_id = nodes[current_id]["parent_id"]
+        if parent_id in seen:
+            return node["id"]
+        seen.add(parent_id)
+        current_id = parent_id
+        if current_id not in nodes:
+            return current_id
+    return current_id
+
+
 def snapshot_from_rows(rows):
     global sequence
     tasks = []
+    nodes = thread_nodes(rows)
     for row in rows:
         status = row.get("status") or {}
-        if row.get("parentThreadId") is not None or status.get("type") != "active":
+        if status.get("type") != "active":
             continue
         flags = status.get("activeFlags") or []
         state = "waiting_for_approval" if "waitingOnApproval" in flags else (
             "waiting_for_input" if "waitingOnUserInput" in flags else "running"
         )
-        try:
-            thread_id = str(uuid.UUID(row["id"]))
-        except (KeyError, TypeError, ValueError):
+        thread_id = canonical_thread_id(row.get("id"))
+        if not thread_id or thread_id not in nodes:
             continue
-        title = " ".join(str(row.get("name") or "Codex task running").split())[:180]
-        tasks.append({
+        node = nodes[thread_id]
+        root_id = root_thread_id(node, nodes)
+        task = {
             "thread_id": thread_id,
-            "title": title or "Codex task running",
+            "title": node["title"] or "Codex task running",
             "state": state,
             "updated_at": iso_time(row.get("updatedAt")),
-        })
+            "root_thread_id": root_id,
+        }
+        if node["parent_id"]:
+            task["parent_thread_id"] = node["parent_id"]
+        if root_id != thread_id and root_id in nodes:
+            task["root_title"] = nodes[root_id]["title"]
+        context = {
+            "project_label": project_label(row.get("cwd")),
+            "branch": clean_optional((row.get("gitInfo") or {}).get("branch"), 160)
+                if isinstance(row.get("gitInfo"), dict) else None,
+            "agent_nickname": clean_optional(row.get("agentNickname"), 80),
+            "agent_role": clean_optional(row.get("agentRole"), 80),
+        }
+        task.update({key: value for key, value in context.items() if value})
+        tasks.append(task)
         if len(tasks) == MAX_TASKS:
             break
     sequence += 1

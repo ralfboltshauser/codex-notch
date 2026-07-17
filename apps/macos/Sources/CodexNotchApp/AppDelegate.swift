@@ -10,8 +10,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let appServerObserver = AppServerObserver()
     private let pairings = PairingStore()
     private let overlay = OverlayController(
-        automaticOpenAllowed: { !DoNotDisturbPreferences.shared.isEnabled }
+        automaticOpenAllowed: { AttentionPreferences.shared.mode != .quiet }
     )
+    private let attention = AttentionCoordinator()
+    private let glanceIndicator = GlanceIndicatorController()
+    private var activeAttentionTracker = ActiveTaskAttentionTracker()
+    private var connectionAttentionTracker = ConnectionAttentionTracker()
     private let notificationSounds = NotificationSoundPlayer()
     private let updater = UpdateCoordinator()
     private let usageMonitor = CodexUsageMonitor()
@@ -68,13 +72,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlay.onSettings = { [weak self] in self?.showOnboarding() }
         overlay.onConnections = { [weak self] in self?.showOnboarding(showConnections: true) }
         overlay.onToggleActiveTasks = { [weak self] in self?.toggleActiveTasks() }
+        attention.onExpand = { [weak self] event in
+            guard let self else { return }
+            self.overlay.showForEvent(triggeringEventID: event.triggeringEventID)
+        }
+        attention.onPlaySound = { [weak self] in self?.notificationSounds.playSelected() }
+        attention.onGlanceCountChanged = { [weak self] count in
+            self?.glanceIndicator.update(count: count)
+        }
+        glanceIndicator.onOpen = { [weak self] in
+            guard let self else { return }
+            self.attention.markSeen()
+            self.usageMonitor.refresh()
+            self.overlay.toggle()
+        }
         overlay.onUpdate = { [weak self] in
             self?.overlay.hide()
             NSApp.activate(ignoringOtherApps: true)
             self?.updater.installAvailableUpdate()
         }
         updater.onAvailabilityChanged = { [weak self] version in
-            self?.overlay.setUpdateAvailable(version: version)
+            guard let self else { return }
+            self.overlay.setUpdateAvailable(version: version)
+            if let version {
+                self.attention.receive(AttentionEvent(
+                    id: "update:\(version)",
+                    kind: .update,
+                    groupID: "update"
+                ), isSurfaceVisible: self.overlay.isAttentionSurfaceVisible)
+            }
         }
         usageMonitor.onChange = { [weak self] state in
             self?.overlay.setUsageState(state)
@@ -86,11 +112,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.usageMonitor.acceptRateLimitResponse(response)
         }
         overlay.onRefreshUsage = { [weak self] in self?.usageMonitor.refresh() }
-        store.onChange = { [weak self] tasks in self?.overlay.update(tasks: tasks) }
+        store.onChange = { [weak self] tasks in
+            guard let self else { return }
+            self.attention.retainCompletionGroups(Set(tasks.map {
+                "completion:\($0.threadID.lowercased())"
+            }))
+            self.overlay.update(tasks: tasks)
+        }
         overlay.update(tasks: store.tasks)
         activeStore.onChange = { [weak self] tasks in
             guard let self else { return }
             self.overlay.update(activeTasks: tasks, visible: self.activePreferences.isVisible)
+            for event in self.activeAttentionTracker.events(for: tasks) {
+                self.attention.receive(event, isSurfaceVisible: self.overlay.isAttentionSurfaceVisible)
+            }
         }
         overlay.update(activeTasks: activeStore.tasks, visible: activePreferences.isVisible)
         updater.start()
@@ -117,7 +152,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             self.hotKeys?.setSettingsShortcutEnabled(visible)
             self.onboarding?.notchVisibilityChanged(visible)
-            if visible { self.remoteHealthMonitor.refresh() }
+            if visible {
+                self.attention.markSeen()
+                self.remoteHealthMonitor.refresh()
+            }
         }
 
         inbox = CompletionInbox { [weak self] event in
@@ -128,8 +166,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pairer.recoverMissingTokens()
         scheduleRemoteCatchUp()
         remoteHealthMonitor.onChange = { [weak self] snapshot in
-            self?.overlay.setRemoteHostHealth(snapshot)
-            self?.onboarding?.updateRemoteHealth(snapshot)
+            self?.remoteHealthDidChange(snapshot)
         }
         remoteHealthMonitor.start()
         appServerObserver.onSnapshot = { [weak self] sourceID, sourceLabel, snapshot in
@@ -188,6 +225,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appServerObserver.stop()
         usageMonitor.stop()
         notchHoverMonitor.stop()
+        glanceIndicator.hide()
         activeReaper?.invalidate()
         if let activePreferenceObserver { NotificationCenter.default.removeObserver(activePreferenceObserver) }
         if let wakeObserver {
@@ -202,13 +240,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let inserted = try store.add(task)
             if inserted {
                 usageMonitor.refresh()
-                notificationSounds.playSelected()
-                overlay.showForEvent(triggeringEventID: task.eventID)
+                attention.receive(AttentionEvent(
+                    id: "completion:\(task.eventID)",
+                    kind: .completion,
+                    groupID: "completion:\(task.threadID.lowercased())",
+                    triggeringEventID: task.eventID
+                ), isSurfaceVisible: overlay.isAttentionSurfaceVisible)
             }
             return inserted ? .accepted : .duplicate
         } catch {
             return .rejected
         }
+    }
+
+    private func remoteHealthDidChange(_ snapshot: RemoteHostHealthSnapshot) {
+        overlay.setRemoteHostHealth(snapshot)
+        onboarding?.updateRemoteHealth(snapshot)
+        guard let event = connectionAttentionTracker.event(for: snapshot) else { return }
+        attention.receive(event, isSurfaceVisible: overlay.isAttentionSurfaceVisible)
     }
 
     private func startRemoteListener(
