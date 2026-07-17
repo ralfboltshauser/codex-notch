@@ -128,7 +128,6 @@ final class OverlayController {
             backing: .buffered,
             defer: false
         )
-        panel.level = .statusBar
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = false
