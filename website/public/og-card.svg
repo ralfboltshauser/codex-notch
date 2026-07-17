@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="42%" r="62%">
+      <stop offset="0" stop-color="#fff"/>
+      <stop offset="1" stop-color="#e9ece5"/>
+    </radialGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#07100c" flood-opacity=".18"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="630" fill="url(#glow)"/>
+  <g opacity=".06" stroke="#0a0d0b">
+    <path d="M0 525h1200M0 565h1200M0 605h1200"/>
+    <path d="M120 430 0 630M280 430 210 630M440 430 420 630M760 430 780 630M920 430 990 630M1080 430l120 200"/>
+  </g>
+  <path d="M525 0h150v24c0 18-14 32-32 32h-86c-18 0-32-14-32-32V0Z" fill="#020403" filter="url(#shadow)"/>
+  <circle cx="649" cy="19" r="4" fill="#18342b"/>
+  <g transform="translate(54 46)" fill="#0a0d0b">
+    <path d="M0 0h23v10c0 8-5 13-11.5 13S0 18 0 10V0Z"/>
+    <text x="35" y="18" font-family="-apple-system,BlinkMacSystemFont,Helvetica Neue,Arial,sans-serif" font-size="18" font-weight="700">Codex Notch</text>
+  </g>
+  <circle cx="72" cy="187" r="5" fill="#68e8b7"/>
+  <text x="92" y="193" fill="#5c645e" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="14" font-weight="700" letter-spacing="2">NATIVE MACOS HUD FOR CODEX</text>
+  <text x="64" y="308" fill="#080b09" font-family="-apple-system,BlinkMacSystemFont,Helvetica Neue,Arial,sans-serif" font-size="90" font-weight="650" letter-spacing="-5">Codex is working.</text>
+  <text x="64" y="402" fill="#929a94" font-family="-apple-system,BlinkMacSystemFont,Helvetica Neue,Arial,sans-serif" font-size="90" font-weight="650" letter-spacing="-5">You don’t have to watch.</text>
+  <text x="68" y="470" fill="#555e58" font-family="-apple-system,BlinkMacSystemFont,Helvetica Neue,Arial,sans-serif" font-size="23">Active tasks, useful interruptions, exact-thread return.</text>
+  <g transform="translate(68 512)">
+    <rect width="286" height="66" rx="18" fill="#080b09"/>
+    <rect x="9" y="9" width="48" height="48" rx="14" fill="#68e8b7"/>
+    <path d="M33 20v20m-7-7 7 7 7-7" fill="none" stroke="#07100c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="73" y="31" fill="#fff" font-family="-apple-system,BlinkMacSystemFont,Helvetica Neue,Arial,sans-serif" font-size="15" font-weight="700">Download Codex Notch</text>
+    <text x="73" y="48" fill="#7d8580" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10">APPLE SILICON · MACOS 13+</text>
+  </g>
+  <g transform="translate(930 494)" filter="url(#shadow)">
+    <path d="M0 0h206v62c0 27-21 48-48 48H48C21 110 0 89 0 62V0Z" fill="#06100c"/>
+    <circle cx="44" cy="47" r="15" fill="#68e8b7"/>
+    <path d="m37 47 5 5 10-11" fill="none" stroke="#07100c" stroke-width="2" stroke-linecap="round"/>
+    <text x="68" y="44" fill="#fff" font-family="-apple-system,BlinkMacSystemFont,Helvetica Neue,Arial,sans-serif" font-size="13" font-weight="700">Turn finished</text>
+    <text x="68" y="62" fill="#7f8d85" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9">THIS MAC · JUST NOW</text>
+  </g>
+</svg>

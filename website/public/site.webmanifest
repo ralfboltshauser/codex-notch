@@ -1,0 +1,23 @@
+{
+  "name": "Codex Notch",
+  "short_name": "Codex Notch",
+  "description": "A native macOS HUD for Codex tasks across your Mac and Ubuntu machines.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "browser",
+  "background_color": "#f2f4ee",
+  "theme_color": "#050706",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
