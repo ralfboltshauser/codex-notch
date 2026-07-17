@@ -1,6 +1,15 @@
 {
   "releases": [
     {
+      "version": "0.4.26",
+      "date": "2026-07-17",
+      "title": "Back where the notch belongs",
+      "changes": [
+        "Restored Codex Notch above the menu bar so it once again reads as an extension of the physical notch.",
+        "The overlay keeps its new virtual-desktop behavior without falling back beneath menu-bar items."
+      ]
+    },
+    {
       "version": "0.4.25",
       "date": "2026-07-17",
       "title": "The notch follows your workspace",

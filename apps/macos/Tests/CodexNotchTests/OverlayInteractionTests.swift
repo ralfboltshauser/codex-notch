@@ -558,6 +558,7 @@ final class OverlayInteractionTests: CodexNotchTestCase {
         let overlay = OverlayController()
 
         XCTAssertTrue(overlay.panel.isFloatingPanel)
+        XCTAssertEqual(overlay.panel.level, .statusBar)
         XCTAssertTrue(overlay.panel.collectionBehavior.contains(.canJoinAllSpaces))
         XCTAssertTrue(overlay.panel.collectionBehavior.contains(.canJoinAllApplications))
         XCTAssertTrue(overlay.panel.collectionBehavior.contains(.fullScreenAuxiliary))
@@ -572,10 +573,12 @@ final class OverlayInteractionTests: CodexNotchTestCase {
         overlay.onVisibilityChanged = { visibility.append($0) }
 
         overlay.toggle()
+        overlay.panel.level = .normal
         overlay.toggle()
 
         XCTAssertTrue(overlay.isVisibleForTesting)
         XCTAssertTrue(overlay.isPinnedForTesting)
+        XCTAssertEqual(overlay.panel.level, .statusBar)
         XCTAssertEqual(visibility, [true])
     }
 

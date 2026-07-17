@@ -64,6 +64,7 @@ enum OverlaySpaceBehavior {
 
     static func configure(_ panel: NSPanel) {
         panel.isFloatingPanel = true
+        panel.level = .statusBar
         panel.collectionBehavior = collectionBehavior
     }
 }
