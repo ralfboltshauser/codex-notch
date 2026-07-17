@@ -159,7 +159,7 @@ final class SettingsTests: CodexNotchTestCase {
 
     func testBundledChangelogMatchesReleaseAndRendersInSettings() throws {
         _ = NSApplication.shared
-        XCTAssertEqual(ChangelogCatalog.releases.first?.version, "0.4.26")
+        XCTAssertEqual(ChangelogCatalog.releases.first?.version, "0.5.0")
         XCTAssertGreaterThanOrEqual(ChangelogCatalog.releases.count, 25)
         XCTAssertTrue(ChangelogCatalog.releases.allSatisfy {
             !$0.title.isEmpty && !$0.changes.isEmpty
@@ -376,30 +376,39 @@ final class SettingsTests: CodexNotchTestCase {
         }
     }
 
-    func testSettingsDoNotDisturbTogglePersistsWithoutMacOSFocus() throws {
+    func testSettingsAttentionAndCompletionOutcomeChoicesPersist() throws {
         _ = NSApplication.shared
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let suite = "CodexNotchTests.SettingsDoNotDisturb.\(UUID())"
+        let suite = "CodexNotchTests.SettingsAttention.\(UUID())"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        let preferences = DoNotDisturbPreferences(defaults: defaults)
+        let attention = AttentionPreferences(defaults: defaults)
+        let outcomes = CompletionOutcomePreferences(defaults: defaults)
         let pairings = PairingStore(fileURL: directory.appendingPathComponent("pairings.json"))
         let pairer = RemoteHostPairer(store: pairings) { _ in }
         let controller = OnboardingWindowController(
             pairings: pairings,
             pairer: pairer,
-            doNotDisturbPreferences: preferences,
+            attentionPreferences: attention,
+            completionOutcomePreferences: outcomes,
             isHookInstalled: { true }
         )
 
         controller.showTasksForTesting()
-        let disabledButton = try XCTUnwrap(controller.doNotDisturbButtonForTesting)
-        XCTAssertEqual(disabledButton.title, "Off")
-        disabledButton.performClick(nil)
+        XCTAssertEqual(attention.mode, .notify)
+        let glance = try XCTUnwrap(controller.attentionModeButtonsForTesting[.glance])
+        XCTAssertFalse(glance.refusesFirstResponder)
+        glance.performClick(nil)
+        XCTAssertEqual(attention.mode, .glance)
+        XCTAssertEqual(controller.attentionModeButtonsForTesting[.glance]?.state, .on)
+        XCTAssertEqual(controller.attentionModeButtonsForTesting[.notify]?.state, .off)
 
-        XCTAssertTrue(preferences.isEnabled)
-        XCTAssertEqual(controller.doNotDisturbButtonForTesting?.title, "On")
+        let outcome = try XCTUnwrap(controller.completionOutcomeButtonForTesting)
+        XCTAssertEqual(outcome.title, "On")
+        outcome.performClick(nil)
+        XCTAssertFalse(outcomes.isEnabled)
+        XCTAssertEqual(controller.completionOutcomeButtonForTesting?.title, "Off")
     }
 
     func testTaskSettingsControlsHaveStableNonOverlappingLayout() throws {
@@ -423,11 +432,14 @@ final class SettingsTests: CodexNotchTestCase {
             "Show active tasks.title",
             "Show active tasks.detail",
             "Show active tasks.toggle",
-            "Do Not Disturb.title",
-            "Do Not Disturb.detail",
-            "Do Not Disturb.toggle",
-            "Quick Toggle.title",
-            "Quick Toggle.keys",
+            "Show completion outcomes.title",
+            "Show completion outcomes.detail",
+            "Show completion outcomes.toggle",
+            "Attention.title",
+            "Attention.detail",
+            "Attention.Notify",
+            "Attention.Glance",
+            "Attention.Quiet",
         ]
 
         XCTAssertEqual(Set(frames.keys), Set(expected))
@@ -442,7 +454,7 @@ final class SettingsTests: CodexNotchTestCase {
             )
         }
 
-        for title in ["Show active tasks", "Do Not Disturb"] {
+        for title in ["Show active tasks", "Show completion outcomes"] {
             let titleFrame = try XCTUnwrap(frames["\(title).title"])
             let detailFrame = try XCTUnwrap(frames["\(title).detail"])
             let toggleFrame = try XCTUnwrap(frames["\(title).toggle"])
@@ -452,10 +464,13 @@ final class SettingsTests: CodexNotchTestCase {
             XCTAssertEqual(titleFrame.midY, toggleFrame.midY, accuracy: 2)
         }
 
-        let shortcutTitle = try XCTUnwrap(frames["Quick Toggle.title"])
-        let shortcutKeys = try XCTUnwrap(frames["Quick Toggle.keys"])
-        XCTAssertFalse(shortcutTitle.intersects(shortcutKeys))
-        XCTAssertGreaterThanOrEqual(shortcutKeys.minX - shortcutTitle.maxX, 15)
+        let attentionButtons = ["Notify", "Glance", "Quiet"].compactMap {
+            frames["Attention.\($0)"]
+        }
+        XCTAssertEqual(attentionButtons.count, 3)
+        for pair in zip(attentionButtons, attentionButtons.dropFirst()) {
+            XCTAssertFalse(pair.0.intersects(pair.1))
+        }
     }
 
     func testThemePreviewIsTemporaryAndSelectionPersists() {

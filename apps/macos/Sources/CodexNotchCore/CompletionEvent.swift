@@ -10,6 +10,7 @@ public struct CompletionEvent: Codable, Equatable, Sendable {
     public let threadID: String
     public let turnID: String
     public let title: String
+    public let outcome: String?
     public let sourceID: String
     public let sourceLabel: String
     public let completedAt: Date
@@ -20,6 +21,7 @@ public struct CompletionEvent: Codable, Equatable, Sendable {
         case threadID = "thread_id"
         case turnID = "turn_id"
         case title
+        case outcome
         case sourceID = "source_id"
         case sourceLabel = "source_label"
         case completedAt = "completed_at"
@@ -33,13 +35,15 @@ public struct CompletionEvent: Codable, Equatable, Sendable {
         title: String,
         sourceID: String,
         sourceLabel: String,
-        completedAt: Date
+        completedAt: Date,
+        outcome: String? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.eventID = eventID
         self.threadID = threadID
         self.turnID = turnID
         self.title = title
+        self.outcome = outcome.flatMap(CompletionOutcomeFormatter.format)
         self.sourceID = sourceID
         self.sourceLabel = sourceLabel
         self.completedAt = completedAt
@@ -55,6 +59,12 @@ public struct CompletionEvent: Codable, Equatable, Sendable {
             && eventID == Self.eventID(threadID: threadID, turnID: turnID)
             && !title.isEmpty
             && title.count <= Self.maximumTitleLength
+            && (outcome.map {
+                !$0.isEmpty
+                    && $0.count <= CompletionOutcomeFormatter.maximumLength
+                    && !$0.contains(where: \.isNewline)
+                    && CompletionOutcomeFormatter.format($0) == $0
+            } ?? true)
             && !sourceID.isEmpty
             && sourceID.utf8.count <= 128
             && !sourceLabel.isEmpty

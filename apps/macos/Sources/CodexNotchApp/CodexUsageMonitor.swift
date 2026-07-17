@@ -8,10 +8,42 @@ struct CodexWeeklyLimit: Equatable {
     let resetsAt: Date?
 }
 
+struct CodexRateLimitWindow: Equatable {
+    let durationMinutes: Int
+    let remainingPercent: Int
+    let resetsAt: Date?
+
+    var durationLabel: String {
+        if durationMinutes.isMultiple(of: 24 * 60) {
+            return "\(durationMinutes / (24 * 60))d"
+        }
+        if durationMinutes.isMultiple(of: 60) {
+            return "\(durationMinutes / 60)h"
+        }
+        return "\(durationMinutes)m"
+    }
+
+    var isReached: Bool { remainingPercent == 0 }
+    var isWeekly: Bool { durationMinutes == CodexWeeklyLimit.weeklyWindowMinutes }
+}
+
+struct CodexAccountRateLimits: Equatable {
+    let windows: [CodexRateLimitWindow]
+
+    var weeklyLimit: CodexWeeklyLimit? {
+        guard let window = windows.first(where: \.isWeekly) else { return nil }
+        return CodexWeeklyLimit(
+            remainingPercent: window.remainingPercent,
+            resetsAt: window.resetsAt
+        )
+    }
+}
+
 enum CodexUsageState: Equatable {
     case idle
     case loading
     case available(CodexUsageOverview)
+    case availableWindows([CodexRateLimitWindow])
     case unavailable(message: String)
 
     var overview: CodexUsageOverview? {
@@ -26,7 +58,7 @@ enum CodexUsageState: Equatable {
 }
 
 enum CodexRateLimitParser {
-    static func weeklyLimit(from response: Data) -> CodexWeeklyLimit? {
+    static func accountLimits(from response: Data) -> CodexAccountRateLimits? {
         guard let root = try? JSONSerialization.jsonObject(with: response) as? [String: Any],
               let result = root["result"] as? [String: Any]
         else { return nil }
@@ -43,23 +75,30 @@ enum CodexRateLimitParser {
         }
 
         for snapshot in snapshots {
-            for key in ["primary", "secondary"] {
+            let windows = ["primary", "secondary"].compactMap { key -> CodexRateLimitWindow? in
                 guard let window = snapshot[key] as? [String: Any],
-                      integer(window["windowDurationMins"]) == CodexWeeklyLimit.weeklyWindowMinutes,
+                      let durationMinutes = integer(window["windowDurationMins"]),
+                      durationMinutes > 0,
                       let usedPercent = integer(window["usedPercent"])
-                else { continue }
+                else { return nil }
 
                 let clampedUsage = min(100, max(0, usedPercent))
                 let resetsAt = integer(window["resetsAt"]).map {
                     Date(timeIntervalSince1970: TimeInterval($0))
                 }
-                return CodexWeeklyLimit(
+                return CodexRateLimitWindow(
+                    durationMinutes: durationMinutes,
                     remainingPercent: 100 - clampedUsage,
                     resetsAt: resetsAt
                 )
             }
+            if !windows.isEmpty { return CodexAccountRateLimits(windows: windows) }
         }
         return nil
+    }
+
+    static func weeklyLimit(from response: Data) -> CodexWeeklyLimit? {
+        accountLimits(from: response)?.weeklyLimit
     }
 
     private static func isCodexAccountSnapshot(_ snapshot: [String: Any]) -> Bool {
@@ -246,10 +285,10 @@ final class CodexUsageMonitor {
     private let availableExecutables: () -> [URL]
     private var timer: DispatchSourceTimer?
     private var isRefreshing = false
-    private var lastOverview: CodexUsageOverview?
+    private var hasAvailableUsage = false
 
     private enum RefreshResult {
-        case available(CodexWeeklyLimit)
+        case available(CodexAccountRateLimits)
         case unavailable(String)
     }
 
@@ -291,8 +330,8 @@ final class CodexUsageMonitor {
     }
 
     func acceptRateLimitResponse(_ response: Data) {
-        guard let limit = CodexRateLimitParser.weeklyLimit(from: response) else { return }
-        queue.async { [weak self] in self?.publish(limit) }
+        guard let limits = CodexRateLimitParser.accountLimits(from: response) else { return }
+        queue.async { [weak self] in self?.publish(limits) }
     }
 
     func stop() {
@@ -342,31 +381,36 @@ final class CodexUsageMonitor {
                 continue
             }
             receivedResponse = true
-            if let limit = CodexRateLimitParser.weeklyLimit(from: response) {
-                return .available(limit)
+            if let limits = CodexRateLimitParser.accountLimits(from: response) {
+                return .available(limits)
             }
         }
         if receivedResponse {
-            return .unavailable("Codex returned no seven-day usage window")
+            return .unavailable("Codex returned no account usage windows")
         }
         return .unavailable(errors.first ?? "Codex usage could not be read")
     }
 
-    private func publish(_ limit: CodexWeeklyLimit) {
+    private func publish(_ limits: CodexAccountRateLimits) {
+        hasAvailableUsage = true
+        guard let limit = limits.weeklyLimit else {
+            publish(.availableWindows(limits.windows))
+            return
+        }
         let observedAt = now()
         let samples = (try? historyStore.observe(limit, at: observedAt))
             ?? historyStore.currentWindowSamples(for: limit)
         let overview = CodexUsageEstimator.overview(
             limit: limit,
             samples: samples,
+            windows: limits.windows,
             now: observedAt
         )
-        lastOverview = overview
         publish(.available(overview))
     }
 
     private func publishUnavailable(_ message: String) {
-        guard lastOverview == nil else { return }
+        guard !hasAvailableUsage else { return }
         let concise = message.split(whereSeparator: \.isNewline).first.map(String.init)
             ?? "Codex usage could not be read"
         publish(.unavailable(message: String(concise.prefix(180))))

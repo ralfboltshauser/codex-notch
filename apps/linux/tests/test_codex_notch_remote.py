@@ -140,6 +140,7 @@ class LinuxHookTests(unittest.TestCase):
         event = ProtocolHandler.received[0]["event"]
         self.assertEqual(event["title"], "Build the overlay")
         self.assertEqual(event["source_label"], "Remote Ubuntu")
+        self.assertNotIn("outcome", event)
         self.assertNotIn("private", json.dumps(event).lower())
 
     def test_failed_delivery_remains_in_outbox(self):

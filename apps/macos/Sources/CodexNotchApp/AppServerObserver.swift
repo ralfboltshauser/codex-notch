@@ -207,23 +207,7 @@ final class AppServerObserver {
 
     private func publish(_ rows: [[String: Any]]) {
         let timestamp = Date()
-        let active = rows.compactMap { row -> ActiveTaskEvent? in
-            guard row["parentThreadId"] is NSNull || row["parentThreadId"] == nil,
-                  let id = row["id"] as? String,
-                  let status = row["status"] as? [String: Any],
-                  status["type"] as? String == "active" else { return nil }
-            let flags = status["activeFlags"] as? [String] ?? []
-            let state: ActiveTaskState = flags.contains("waitingOnApproval")
-                ? .waitingForApproval
-                : (flags.contains("waitingOnUserInput") ? .waitingForInput : .running)
-            let seconds = (row["updatedAt"] as? NSNumber)?.doubleValue
-            return ActiveTaskEvent(
-                threadID: id,
-                title: CompletionEvent.cleanTitle(row["name"] as? String ?? "Codex task running"),
-                state: state,
-                updatedAt: seconds.map { Date(timeIntervalSince1970: $0) } ?? timestamp
-            )
-        }
+        let active = AppServerThreadProjection.activeEvents(from: rows, observedAt: timestamp)
         sequence &+= 1
         let snapshot = ActiveTaskSnapshot(
             generation: generation,

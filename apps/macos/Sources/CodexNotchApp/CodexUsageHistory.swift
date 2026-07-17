@@ -25,6 +25,23 @@ struct CodexUsageOverview: Equatable {
     let limit: CodexWeeklyLimit
     let forecast: CodexUsageForecast
     let recentTrend: CodexUsageTrend?
+    let windows: [CodexRateLimitWindow]
+
+    init(
+        limit: CodexWeeklyLimit,
+        forecast: CodexUsageForecast,
+        recentTrend: CodexUsageTrend?,
+        windows: [CodexRateLimitWindow]? = nil
+    ) {
+        self.limit = limit
+        self.forecast = forecast
+        self.recentTrend = recentTrend
+        self.windows = windows ?? [CodexRateLimitWindow(
+            durationMinutes: CodexWeeklyLimit.weeklyWindowMinutes,
+            remainingPercent: limit.remainingPercent,
+            resetsAt: limit.resetsAt
+        )]
+    }
 }
 
 enum CodexUsageEstimator {
@@ -36,13 +53,15 @@ enum CodexUsageEstimator {
     static func overview(
         limit: CodexWeeklyLimit,
         samples: [CodexUsageSample],
+        windows: [CodexRateLimitWindow]? = nil,
         now: Date = Date()
     ) -> CodexUsageOverview {
         let segment = currentTrendSegment(limit: limit, samples: samples, now: now)
         return CodexUsageOverview(
             limit: limit,
             forecast: forecast(limit: limit, segment: segment, now: now),
-            recentTrend: recentTrend(in: segment)
+            recentTrend: recentTrend(in: segment),
+            windows: windows
         )
     }
 

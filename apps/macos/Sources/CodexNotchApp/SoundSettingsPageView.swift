@@ -84,7 +84,7 @@ final class SoundSettingsPageView: NSView {
         contextIcon.contentTintColor = theme.accent
         contextIcon.translatesAutoresizingMaskIntoConstraints = false
         let context = SettingsViewFactory.label(
-            "Sounds play only for newly accepted local or remote Stop-hook events. Opening the notch yourself stays quiet.",
+            "Sounds play only for newly accepted completions in Notify mode. Glance, Quiet, and manual openings stay silent.",
             size: 11.5,
             weight: .regular,
             color: theme.secondaryText,

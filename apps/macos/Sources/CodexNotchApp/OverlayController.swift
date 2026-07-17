@@ -58,6 +58,7 @@ final class OverlayController {
     private var dismissingEventIDs: Set<String> = []
     var triggeringEventID: String?
     private var themeObserver: NSObjectProtocol?
+    private var completionOutcomeObserver: NSObjectProtocol?
 
     var onOpen: ((CompletedTask) -> Bool)?
     var onOpenActive: ((ActiveTask) -> Bool)?
@@ -71,6 +72,9 @@ final class OverlayController {
     var onUpdate: (() -> Void)?
     var onVisibilityChanged: ((Bool) -> Void)?
     var isLaunchingForTesting: Bool { phase == .launching }
+    var isAttentionSurfaceVisible: Bool {
+        panel.isVisible && isWindowOnActiveSpace(panel) && (phase == .opening || phase == .open)
+    }
     var hasContent: Bool {
         !tasks.isEmpty
             || (showsActiveTasks && !activeTasks.isEmpty)
@@ -100,7 +104,6 @@ final class OverlayController {
     private var currentHostHealthOverview: HostHealthOverview {
         HostHealthOverview(local: localHostHealth(), remote: remoteHealth)
     }
-
     init(
         automaticOpenAllowed: @escaping () -> Bool = { true },
         localHostHealth: @escaping () -> LocalHostHealth = {
@@ -143,16 +146,18 @@ final class OverlayController {
             queue: .main
         ) { [weak self] _ in self?.screenParametersDidChange() }
         themeObserver = NotificationCenter.default.addObserver(
-            forName: ThemeStore.didChangeNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in self?.themeDidChange() }
+            forName: ThemeStore.didChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in self?.presentationPreferenceDidChange() }
+        completionOutcomeObserver = NotificationCenter.default.addObserver(
+            forName: CompletionOutcomePreferences.didChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in self?.presentationPreferenceDidChange() }
     }
 
     deinit {
         shortcutModifierTimer?.invalidate()
         relativeTimeTimer?.invalidate()
         if let themeObserver { NotificationCenter.default.removeObserver(themeObserver) }
+        if let completionOutcomeObserver { NotificationCenter.default.removeObserver(completionOutcomeObserver) }
     }
 
     func refreshShortcutModifierStateForTesting() {
@@ -163,7 +168,7 @@ final class OverlayController {
         contentHoverChanged(hovering)
     }
 
-    private func themeDidChange() {
+    private func presentationPreferenceDidChange() {
         if deferVisibleRebuildWhileShortcutsLocked() { return }
         switch phase {
         case .opening, .closing, .launching:
@@ -221,7 +226,6 @@ final class OverlayController {
     }
 
     func setUpdateAvailable(version: String?) {
-        let wasAvailable = updateVersion != nil
         updateVersion = version
         if deferVisibleRebuildWhileShortcutsLocked() { return }
         switch phase {
@@ -233,14 +237,11 @@ final class OverlayController {
             rebuildContent(initiallyExpanded: true)
             positionPanel()
         }
-
-        if version != nil, !wasAvailable { showForEvent() }
     }
 
     func setUsageOverview(_ overview: CodexUsageOverview?) {
         setUsageState(overview.map(CodexUsageState.available) ?? .idle)
     }
-
     func setUsageState(_ state: CodexUsageState) {
         guard usageState != state else { return }
         let visibilityChanged = usageState.isVisible != state.isVisible
@@ -281,6 +282,7 @@ final class OverlayController {
 
     func showForEvent(triggeringEventID: String? = nil) {
         guard automaticOpenAllowed(), hasContent else { return }
+        if panel.isVisible, !isWindowOnActiveSpace(panel) { revealPanelOnActiveSpace() }
         let resolvedTrigger = triggeringEventID.flatMap { eventID in
             presentedTasks.contains(where: { $0.eventID == eventID }) ? eventID : nil
         }
@@ -666,6 +668,8 @@ final class OverlayController {
                 geometry: geometry,
                 theme: theme,
                 completedTasks: completedTasks,
+                showsCompletionOutcomes: CompletionOutcomePreferences.shared.isEnabled,
+                attentionMode: AttentionPreferences.shared.mode,
                 displayedActiveTasks: activeTasks,
                 totalActiveTaskCount: presentationScope == .full
                     ? self.activeTasks.count
@@ -730,7 +734,6 @@ final class OverlayController {
     private func positionPanel() {
         panel.setFrameOrigin(visibleOrigin())
     }
-
     private func revealPanelOnActiveSpace() {
         // AppKit can retain an ordered panel on its previous Space even though
         // it remains `isVisible`. Reassert the overlay behavior before ordering
