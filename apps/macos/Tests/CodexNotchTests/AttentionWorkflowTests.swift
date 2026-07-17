@@ -33,8 +33,6 @@ final class AttentionWorkflowTests: CodexNotchTestCase {
         let preferences = AttentionPreferences(defaults: defaults)
         preferences.mode = .glance
         let coordinator = AttentionCoordinator(preferences: preferences)
-        var presentedCounts: [Int] = []
-        coordinator.onGlanceCountChanged = { presentedCounts.append($0) }
         var counts: [Int] = []
         var expansions: [AttentionEvent] = []
         coordinator.onGlanceCountChanged = { counts.append($0) }
@@ -60,6 +58,8 @@ final class AttentionWorkflowTests: CodexNotchTestCase {
         let preferences = AttentionPreferences(defaults: defaults)
         preferences.mode = .glance
         let coordinator = AttentionCoordinator(preferences: preferences)
+        var presentedCounts: [Int] = []
+        coordinator.onGlanceCountChanged = { presentedCounts.append($0) }
 
         coordinator.receive(AttentionEvent(
             id: "completion:event-1",
