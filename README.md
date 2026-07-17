@@ -1,72 +1,104 @@
-# Codex Notch
+<div align="center">
+  <img src="website/public/favicon.svg" width="72" height="72" alt="Codex Notch icon" />
+  <h1>Codex Notch</h1>
+  <p><strong>Leave the Codex window. Keep the signal.</strong></p>
+  <p>A native macOS HUD for active and completed Codex work on this Mac and optional Ubuntu hosts.</p>
 
-Codex Notch is a native macOS overlay for active and finished Codex turns. It works
-entirely on one Mac, and can also receive completions from Ubuntu hosts over an
-existing Tailscale network. There is no hosted relay, account, or public port.
+  <p>
+    <a href="https://github.com/ralfboltshauser/codex-notch/releases/latest"><img src="https://img.shields.io/github/v/release/ralfboltshauser/codex-notch?style=flat-square&amp;label=release&amp;labelColor=050706&amp;color=68e8b7" alt="Latest release" /></a>
+    <a href="https://github.com/ralfboltshauser/codex-notch/actions/workflows/ci.yml"><img src="https://github.com/ralfboltshauser/codex-notch/actions/workflows/ci.yml/badge.svg" alt="CI status" /></a>
+    <img src="https://img.shields.io/badge/macOS-13%2B-050706?style=flat-square&amp;logo=apple&amp;logoColor=white" alt="macOS 13 or later" />
+    <img src="https://img.shields.io/badge/Apple_silicon-required-050706?style=flat-square" alt="Apple silicon required" />
+  </p>
 
-## How it works
+  <p>
+    <a href="https://github.com/ralfboltshauser/codex-notch/releases/latest"><strong>Download the signed app</strong></a>
+    &nbsp;·&nbsp;
+    <a href="https://codex-notch.openexp.dev/">Try the web demo</a>
+    &nbsp;·&nbsp;
+    <a href="https://github.com/ralfboltshauser/codex-notch/releases">Release notes</a>
+  </p>
+</div>
 
-Active tasks come from Codex App Server's runtime status rather than guessed
-process or transcript state. Codex Notch connects read-only to the local Unix
-WebSocket, keeps the latest full snapshot in memory, and shows running tasks as
-well as tasks waiting for approval or input. Active tasks never auto-open the
-notch. If the observer disconnects, rows first show that state and then expire;
-live snapshots are never queued or replayed.
+![Codex Notch extending from the top of a Mac display with abstract active and completed task rows](docs/images/codex-notch-hero.jpg)
 
-### Mac-only
+<p align="center"><sub>Product visualization based on the current macOS interface. Task content is intentionally abstracted.</sub></p>
 
-The bundled `CodexNotchHook` is registered as a Codex `Stop` hook. It writes a
-small JSON event atomically to:
+Codex Notch is for developers who start more Codex work than they want to
+watch. Start a turn, move to another window, and let the top edge of the display
+carry the small amount of state that still matters: what is running, what needs
+you, and what just finished.
 
-```text
-~/Library/Application Support/Codex Notch/inbox/
-```
+It is not a hosted dashboard or a general notification center. The Mac app stays
+local, active state comes from Codex App Server, completed turns arrive through
+Codex Stop hooks, and selecting a task returns to the validated
+`codex://threads/<uuid>` thread.
 
-The app monitors that directory, persists the event, and shows it in the
-overlay. Opening an item uses the validated local `codex://threads/<uuid>` deep
-link. No network process is involved.
+> **Best fit:** an Apple silicon Mac running Codex locally, with optional Codex
+> work delegated to Ubuntu machines over an existing private Tailscale network.
 
-The app also starts the installed Codex CLI's local `app-server` briefly to read
-the authenticated account's rolling rate-limit snapshot. The seven-day window
-is shown as remaining capacity, recent usage, reset time, and a local pace
-forecast in the notch. Codex exposes this value as a whole percentage, so Codex
-Notch does not invent sub-percent precision: it checks every 15 minutes (and
-when the notch opens), records percentage changes plus hourly flat checkpoints,
-and waits for at least one hour and a two-point change before estimating when
-capacity will run out. Reset-crossing forecasts account for the one-point
-measurement boundary. Eight weeks of timestamp, percentage, and reset metadata
-are kept locally in a user-only file; prompts and credentials are never read or
-stored.
+## The three moments
 
-### Ubuntu to Mac
+![Three moments in the Codex Notch workflow: leave the work, receive a compact completion signal, and return through the full notch](docs/images/codex-notch-workflow.jpg)
 
-The Mac app pairs an Ubuntu host through an SSH alias from `~/.ssh/config`. It
-uploads the Python publisher, generates a 256-bit token, and gives the publisher
-the Mac's Tailscale IPv4 address. The Ubuntu hook writes every completion to a
-durable outbox before attempting delivery. A separate systemd user service
-observes that host's local App Server and sends replace-only active snapshots;
-its failures cannot block the completion hook.
+<p align="center"><sub>Conceptual sequence of the real delegate, compact completion, and exact-thread handoff states.</sub></p>
 
-Delivery uses a length-prefixed JSON message on TCP port `47391` over Tailscale.
-The Mac authenticates the token, persists the event, and only then acknowledges
-it. A systemd user timer retries queued events every 30 seconds; the Mac also
-asks each paired host to flush after launch and wake. The queue keeps at most 500
-events and expires undelivered events after seven days.
+| 1. Delegate | 2. Get the useful signal | 3. Return exactly |
+| --- | --- | --- |
+| Start a Codex turn and leave the window. Active work stays quiet. | A completed turn opens one compact row without taking keyboard focus. | Hover the row or open the notch, choose the task, and return to its exact Codex thread. |
 
-Opening a local or remote item uses Codex's validated
-`codex://threads/<uuid>` deep link.
+The full notch remains available whenever you want the complete picture. It can
+show active work, tasks waiting for approval or input, recent completions,
+weekly Codex capacity, paired-host health, and available app updates without
+turning the menu bar into another dashboard.
 
-## Requirements
+## What makes it useful
 
+- **Real runtime state.** Active tasks come from Codex App Server, not process
+  names, transcript scraping, or stale terminal text.
+- **One quiet interruption.** Active work never opens the notch automatically.
+  New Stop-hook events can open one compact completion row.
+- **Exact-thread handoff.** Codex Notch validates the thread UUID and constructs
+  the deep link itself. Remote payloads cannot provide a URL or command.
+- **One view across machines.** The Mac UI can combine local Codex work with
+  durable completion delivery and replace-only live snapshots from Ubuntu.
+- **A glanceable weekly pace.** The header shows the account-wide seven-day
+  capacity remaining, reset time, recent pace, and a deliberately conservative
+  local forecast.
+- **Native control.** Global shortcuts, six themes, six completion sounds, task
+  visibility, and Do Not Disturb are built into the app. macOS Focus is neither
+  read nor changed.
+
+## Install
+
+### Requirements
+
+- Apple silicon Mac
 - macOS 13 or later
-- Swift 5.10 or later when building from source
-- Codex CLI on each machine that runs Codex
-- Python 3 on Ubuntu
-- Tailscale and key-based SSH for remote pairing
+- Codex CLI on every machine that runs Codex
+- Python 3 on Ubuntu, only when adding a remote host
+- Tailscale and key-based SSH, only when adding a remote host
 
-Tailscale is optional when all Codex sessions run on the Mac.
+Tailscale is not required when every Codex session runs on the Mac.
 
-## Install on macOS
+### Install the signed release
+
+1. Open the [latest GitHub Release](https://github.com/ralfboltshauser/codex-notch/releases/latest).
+2. Download `CodexNotch-<version>.zip`, unzip it, and move
+   `Codex Notch.app` to `/Applications` or `~/Applications`.
+3. Open the app and follow the four-step onboarding.
+4. Let onboarding install the bundled local Stop hook, then approve
+   `Saving completion to Codex Notch` when Codex opens its hook review.
+5. Hover the physical notch or the top-center screen edge, or press
+   <kbd>Control</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd>.
+
+Release builds are Apple Developer ID signed, notarized, and stapled. Sparkle
+verifies both Apple code signing and the release's Ed25519 signature before an
+update is installed.
+
+### Build and install from source
+
+Building from source requires Swift 5.10 or later on macOS:
 
 ```sh
 git clone https://github.com/ralfboltshauser/codex-notch.git
@@ -74,177 +106,197 @@ cd codex-notch
 ./scripts/install-native-macos.sh
 ```
 
-The app opens its setup window. Install the local hook, then use Codex `/hooks`
-once to review and trust `Saving completion to Codex Notch`.
+This creates an ad-hoc-signed development build under
+`~/Applications/Codex Notch.app` and opens the same onboarding flow.
 
-To add Ubuntu, enter its SSH alias in **Connections** and choose **Pair**. The
-app opens a remote Codex session so you can review and trust `Queueing completion
-for Codex Notch` there as well.
+## Add an Ubuntu host
 
-The notch summarizes all paired hosts in one compact status badge. **Connections**
-shows the result for each host and can refresh it manually. A working result
-verifies the remote publisher, Codex hook registration, SSH reachability, and
-an authenticated ping back to the Mac receiver. Current publishers also report
-an untrusted hook as needing attention.
+Mac-only use is the simplest path. Add Ubuntu when Codex also runs on a home
+machine, workstation, or server that already belongs to the same tailnet.
 
-### Nerd shortcuts
+1. Confirm Tailscale is connected on both machines.
+2. Add the Ubuntu machine as an SSH alias in `~/.ssh/config` and verify key-based
+   SSH works from the Mac.
+3. Open **Settings → Connections**, enter that alias, and choose **Pair**.
+4. Codex Notch uploads the Python publisher, creates a per-host 256-bit token,
+   and installs the completion retry timer and live-state user service.
+5. Approve `Queueing completion for Codex Notch` when the remote Codex hook
+   review opens.
 
-These global shortcuts follow the Swiss German keyboard layout. Hold
+The Connections page verifies the publisher, hook registration, SSH path, and
+an authenticated ping back to the Mac. It also reports when a remote hook still
+needs approval.
+
+<details>
+<summary>Manual Ubuntu setup for development</summary>
+
+Normal pairing should start from the Mac app. For development, install the
+publisher with pairing values created by a trusted Mac:
+
+```sh
+./scripts/install-remote-linux.sh MAC_TAILSCALE_IP 64_HEX_TOKEN HOST_LABEL HOST_ID
+```
+
+Remove it with:
+
+```sh
+./scripts/uninstall-remote-linux.sh
+```
+
+</details>
+
+## How the state moves
+
+```mermaid
+flowchart LR
+  subgraph Mac["Your Mac"]
+    MC["Codex CLI"] --> MAS["Local App Server"]
+    MAS -->|"live snapshots"| HUD["Codex Notch"]
+    MC --> MH["Stop hook"]
+    MH --> MI["Atomic local inbox"]
+    MI --> HUD
+  end
+
+  subgraph Ubuntu["Optional Ubuntu host"]
+    UC["Codex CLI"] --> UH["Stop hook"]
+    UC --> UL["Live observer"]
+    UH --> UO["Durable outbox"]
+  end
+
+  UO -->|"Tailscale TCP 47391"| HUD
+  UL -->|"replace-only snapshots"| HUD
+  HUD -->|"validated thread UUID"| CT["Exact Codex thread"]
+```
+
+### Local path
+
+The app connects read-only to the local Codex App Server Unix WebSocket and
+keeps only the latest full active-task snapshot in memory. The bundled Stop hook
+writes a small JSON completion event atomically to:
+
+```text
+~/Library/Application Support/Codex Notch/inbox/
+```
+
+If the active observer disconnects, the rows show that state and then expire.
+Live snapshots are not queued or replayed.
+
+### Remote path
+
+The Ubuntu Stop hook writes every completion to a durable outbox before trying
+delivery. A systemd user timer retries queued events every 30 seconds. The queue
+keeps at most 500 events and expires undelivered events after seven days.
+
+A separate user service observes that host's App Server and sends replace-only
+live snapshots. Its failure cannot block completion delivery. The Mac persists
+an authenticated completion before acknowledging it, and content-derived event
+IDs make retries idempotent.
+
+See [the protocol specification](docs/protocol-v1.md) for the frame and payload
+contract and [the architecture notes](docs/architecture.md) for code boundaries.
+
+## Privacy and security boundaries
+
+| Concern | What Codex Notch does |
+| --- | --- |
+| Hosted infrastructure | None. There is no Codex Notch account, hosted relay, or public port. |
+| Network binding | The receiver binds only to the Mac's detected Tailscale IPv4 address on TCP port `47391`. |
+| Remote authentication | Every Ubuntu host receives a separate random token stored in a user-only `0600` file. |
+| Completion payload | Thread ID, turn ID, title, source identity, and timestamp. |
+| Active snapshot | Thread ID, title, display state, and timestamp. |
+| Never sent | Working directories, prompts, transcripts, model output, Codex credentials, URLs, and commands. |
+| Weekly usage | Read locally from Codex's app-server protocol. History stores timestamps, whole remaining percentages, and reset metadata for eight weeks. |
+| Existing hooks | Installation merges with `hooks.json` and creates a backup instead of replacing unrelated hooks. |
+
+Anyone with access to an Ubuntu account can read that host's pairing token.
+Tailscale access controls should still restrict which tailnet devices can reach
+the Mac.
+
+## Keyboard control
+
+The global shortcuts below follow the Swiss German keyboard layout. Hold
 <kbd>Control</kbd>+<kbd>Shift</kbd>, then press:
 
 | Key | Action |
 | --- | --- |
 | `H` | Toggle the notch |
 | `R` | Show or hide active tasks |
-| `J`, `K`, `L`, `Ö` | Open tasks 1–4 |
-| `U`, `I`, `O`, `P` | Open tasks 5–8 |
-| `N`, `M` | Open tasks 9–10 |
+| `J`, `K`, `L`, `Ö` | Open tasks 1 to 4 |
+| `U`, `I`, `O`, `P` | Open tasks 5 to 8 |
+| `N`, `M` | Open tasks 9 and 10 |
 
-The existing number-key shortcuts remain available.
-While Control and Shift are held with the notch open, each task number
-changes to its corresponding nerd-key letter and switches back on release.
-The visible task order and every shortcut target are frozen for the duration;
-the header shows `LOCKED`, and queued task, usage, update, and connection changes
-are applied only after both modifiers are released.
-While the notch is open, <kbd>Command</kbd>+<kbd>,</kbd> opens Settings. The
-shortcut is released back to the foreground app as soon as the notch closes.
+The number-key shortcuts remain available. While Control and Shift are held,
+Codex Notch freezes task order so a live update cannot move the target beneath
+your fingers. The header shows `LOCKED` until both modifiers are released.
 
-Under **Settings → Themes**, choose from six deep-color themes. Hovering a
-theme previews it live across Settings and the real open notch; clicking keeps
-the choice across launches. The hardware-facing neck remains true black so
-every palette still blends into a MacBook display notch.
+With the notch open, <kbd>Command</kbd>+<kbd>,</kbd> opens Settings. The shortcut
+returns to the foreground app as soon as the notch closes.
 
-Under **Settings → Sounds**, choose from six short completion tones or select
-**No Sound**. A choice previews immediately and is remembered across launches.
-Sounds play only for newly accepted local or remote Stop-hook events; opening the
-notch manually stays quiet.
+## Settings that change behavior
 
-Under **Settings → Tasks**, active task display can be disabled without stopping
-the observer. Keeping the in-memory snapshot hot makes re-enabling immediate.
-The same `⌃⇧R` shortcut is shown beside the active-task control in the notch.
-The independent **Do Not Disturb** switch keeps completed tasks and available
-updates in the notch without opening it automatically. Manual shortcuts and the
-selected completion sound continue to work; macOS Focus is not read or changed.
+- **Themes:** six authored palettes with live preview. The hardware-facing neck
+  remains true black so it still blends into the physical display notch.
+- **Sounds:** six short completion tones plus No Sound. Manual openings remain
+  quiet.
+- **Tasks:** active task display can be disabled without stopping the in-memory
+  observer.
+- **Do Not Disturb:** finished tasks and updates remain available, but do not
+  open the notch automatically. Manual shortcuts and sounds still work.
+- **Updates:** Sparkle checks the signed feed every six hours, and Settings can
+  request a check immediately.
 
-Choose **Check for Updates** at the bottom of Settings to ask Sparkle for the
-latest signed release immediately.
+## Develop and verify
 
-To remove Codex Notch, open **Connections** and choose **Uninstall Codex Notch…**.
-The app first removes and verifies its hooks, retry services, configuration, and
-queued events on every paired Ubuntu host. It then removes the local hook and
-hook backup, login registration, pairing credentials, app data, and app bundle
-from the Mac. If a remote host cannot be reached, the Mac installation is kept
-so the cleanup can be retried without forgetting that host.
+The repository is a small monorepo:
 
-## Manual Ubuntu install
+| Path | Responsibility |
+| --- | --- |
+| `apps/macos` | Swift package for the native HUD, settings, stores, listeners, and bundled Stop-hook helper |
+| `apps/linux` | Ubuntu completion publisher, live-state observer, and tests |
+| `scripts` | Build, install, validation, release, and uninstall entry points |
+| `website` | Motion-based product site and interactive web simulation |
 
-Normal pairing is initiated by the Mac app. For development, the publisher can
-also be installed manually with values generated by a trusted Mac pairing:
-
-```sh
-./scripts/install-remote-linux.sh MAC_TAILSCALE_IP 64_HEX_TOKEN HOST_LABEL HOST_ID
-```
-
-Uninstall it with:
-
-```sh
-./scripts/uninstall-remote-linux.sh
-```
-
-## Security and data
-
-- The receiver binds only to the Mac's detected Tailscale IPv4 address.
-- Every remote host gets a separate random token stored in a user-only `0600`
-  file under Codex Notch's Application Support directory. The receiver loads
-  tokens into memory at launch, so accepting a completion never invokes a
-  credential UI or blocks on Keychain access.
-- Remote messages cannot provide a URL or command. Thread IDs must be UUIDs,
-  and the app constructs the local or SSH action itself.
-- Weekly usage comes from Codex's local app-server protocol. Codex Notch does
-  not inspect auth files, browser storage, or terminal output. Its local usage
-  history contains only timestamps, whole remaining percentages, and reset
-  timestamps, and is removed with the rest of the app data during uninstall.
-- Completion events contain only thread ID, turn ID, title, source identity, and
-  timestamp. Active snapshots contain only thread ID, title, display state, and
-  timestamp.
-  Working directories, prompts, transcripts, and model output are not sent.
-- Delivery is at least once. Content-derived event IDs make retries idempotent.
-- Hook installation merges with existing `hooks.json` entries and creates a
-  backup instead of replacing unrelated hooks.
-
-Anyone with access to the Ubuntu account can read that host's pairing token.
-Tailscale access controls should still restrict which tailnet devices can reach
-the Mac.
-
-## Development
-
-The standalone SwiftPM package is under `apps/macos`, and the Ubuntu publishers
-and their tests are under `apps/linux`. Repository-wide build, install, and
-release entry points live under `scripts`, alongside tests for repository
-tooling. The root `Makefile` orchestrates both apps.
-
-Run Ubuntu tests on Linux or macOS:
+Run the portable Linux and repository preflight on Linux or macOS:
 
 ```sh
 make check-linux
 ```
 
-Run the full Swift suite on macOS:
+Run the Swift suite and package an ad-hoc development app on macOS:
 
 ```sh
 make test-macos
+make build-macos
 ```
 
-`make build-macos` creates an ad-hoc-signed development app. For a build that
-friends can open without bypassing Gatekeeper, set a Developer ID identity and
-notarytool profile, then run:
+macOS CI is authoritative for AppKit type checking, Swift tests, linking, and
+the packaged application. The release workflow then verifies an arm64 binary,
+Developer ID signing, notarization, stapling, the signed Sparkle appcast, and
+the published archive checksum.
+
+See [the update pipeline](docs/update-pipeline.md) for release operations and
+key recovery.
+
+## Remove Codex Notch
+
+Open **Settings → Connections** and choose **Uninstall Codex Notch…**. The app
+removes and verifies its hooks, retry services, configuration, and queued events
+on every paired Ubuntu host before removing the local hook, login registration,
+pairing credentials, app data, and app bundle.
+
+If a remote host is unavailable, the Mac installation is kept so cleanup can be
+retried without forgetting that host.
+
+Source installations can also run:
 
 ```sh
-CODE_SIGN_IDENTITY='Developer ID Application: Example (TEAMID)' \
-NOTARY_PROFILE='codex-notch-notary' \
-./scripts/release-macos.sh
+./scripts/uninstall-native-macos.sh
 ```
 
-The notarized archive is written to `.build/dist/CodexNotch.zip`.
+## Project links
 
-## Updates
-
-Codex Notch uses Sparkle 2.9.4 with a signed appcast hosted as a GitHub Release
-asset. The app probes the feed silently every six hours. When a newer signed
-version exists, a green download icon appears in the notch; selecting it opens
-Sparkle's verified install flow. Update archives are checked with both Apple
-code signing and a dedicated Ed25519 signature. Feed metadata is signed too,
-and each archive is verified before extraction.
-
-The release workflow needs these GitHub Actions secrets:
-
-- `MACOS_CERTIFICATE_P12`: base64-encoded Developer ID Application certificate
-- `MACOS_CERTIFICATE_PASSWORD`: password protecting the `.p12`
-- `APPLE_ID`: Apple ID used for notarization
-- `APPLE_TEAM_ID`: Apple Developer team ID
-- `APPLE_APP_PASSWORD`: app-specific Apple ID password
-- `SPARKLE_PRIVATE_KEY`: base64 Sparkle private seed
-
-`SPARKLE_PRIVATE_KEY` is configured for this repository. Its local recovery
-copy is stored outside Git at
-`~/.config/codex-notch/sparkle_private_key`; back it up in a password manager.
-
-To publish a release after the Apple secrets are configured:
-
-```sh
-edit apps/macos/Sources/CodexNotchApp/Resources/Changelog.json
-./scripts/prepare-release.sh 0.4.14
-git add apps/macos/AppResources/Info.plist \
-  apps/macos/Sources/CodexNotchApp/Resources/Changelog.json
-git commit -m 'Prepare 0.4.14 release'
-git tag v0.4.14
-git push origin main v0.4.14
-```
-
-The tag workflow builds and signs the complete app, notarizes and staples it,
-generates an EdDSA-signed `appcast.xml`, and publishes both files in a GitHub
-Release. Sparkle reads the feed through GitHub's stable
-`releases/latest/download/appcast.xml` URL.
-
-See [docs/update-pipeline.md](docs/update-pipeline.md) for certificate setup,
-release commands, key recovery, and first-release testing.
+- [Product site and interactive demo](https://codex-notch.openexp.dev/)
+- [Latest signed release](https://github.com/ralfboltshauser/codex-notch/releases/latest)
+- [Architecture](docs/architecture.md)
+- [Remote protocol](docs/protocol-v1.md)
+- [Update and release pipeline](docs/update-pipeline.md)
