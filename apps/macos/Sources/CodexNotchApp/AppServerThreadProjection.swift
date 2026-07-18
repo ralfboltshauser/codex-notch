@@ -47,6 +47,47 @@ enum AppServerThreadProjection {
         }
     }
 
+    /// Retains only the App Server fields needed to reconcile active tasks.
+    /// In particular, thread previews, turns, rollout paths, and git remotes
+    /// never survive beyond the response handler.
+    static func reconciliationRow(from row: [String: Any]) -> [String: Any]? {
+        guard let rawID = row["id"] as? String,
+              let id = canonicalThreadID(rawID),
+              let rawStatus = row["status"] as? [String: Any],
+              let statusType = rawStatus["type"] as? String else { return nil }
+        var result: [String: Any] = ["id": id]
+
+        if let name = row["name"] as? String { result["name"] = name }
+        if let rawParent = row["parentThreadId"], !(rawParent is NSNull) {
+            guard let rawParentID = rawParent as? String,
+                  let parentID = canonicalThreadID(rawParentID) else { return nil }
+            result["parentThreadId"] = parentID
+        }
+        if let updatedAt = row["updatedAt"] as? NSNumber {
+            result["updatedAt"] = updatedAt
+        }
+        if let label = projectLabel(from: row["cwd"] as? String) {
+            result["projectLabel"] = label
+        }
+        if let gitInfo = row["gitInfo"] as? [String: Any],
+           let branch = gitInfo["branch"] as? String {
+            result["gitInfo"] = ["branch": branch]
+        }
+        if let nickname = row["agentNickname"] as? String {
+            result["agentNickname"] = nickname
+        }
+        if let role = row["agentRole"] as? String {
+            result["agentRole"] = role
+        }
+        var status: [String: Any] = ["type": statusType]
+        if let rawFlags = rawStatus["activeFlags"], !(rawFlags is NSNull) {
+            guard let flags = rawFlags as? [String] else { return nil }
+            status["activeFlags"] = flags
+        }
+        result["status"] = status
+        return result
+    }
+
     private static func node(
         from row: [String: Any],
         observedAt: Date
@@ -69,7 +110,10 @@ enum AppServerThreadProjection {
             id: id,
             title: CompletionEvent.cleanTitle(row["name"] as? String ?? "Codex task running"),
             parentID: (row["parentThreadId"] as? String).flatMap(canonicalThreadID),
-            projectLabel: projectLabel(from: row["cwd"] as? String),
+            projectLabel: cleanOptional(
+                row["projectLabel"] as? String,
+                maximum: ActiveTaskEvent.maximumProjectLabelLength
+            ) ?? projectLabel(from: row["cwd"] as? String),
             branch: cleanOptional(
                 gitInfo?["branch"] as? String,
                 maximum: ActiveTaskEvent.maximumBranchLength

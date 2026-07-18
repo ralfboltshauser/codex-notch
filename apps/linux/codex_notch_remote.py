@@ -2,7 +2,9 @@
 """Durable Codex completion publisher for a remote Ubuntu host."""
 
 import argparse
+from contextlib import contextmanager
 import datetime
+import fcntl
 import hashlib
 import ipaddress
 import json
@@ -27,6 +29,9 @@ MAX_TITLE_LENGTH = 180
 DEFAULT_PORT = 47391
 OUTBOX_RETENTION_DAYS = 7
 OUTBOX_MAX_EVENTS = 500
+OUTBOX_LOCK_TIMEOUT = 2
+FLUSH_LOCK_TIMEOUT = 0.1
+LOCAL_QUEUE_ORDER_KEY = "_codex_notch_queued_at_ns"
 TOKEN_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 HOST_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$")
 
@@ -49,6 +54,14 @@ def config_file():
 
 def outbox_directory():
     return state_root() / "outbox"
+
+
+def outbox_lock_file():
+    return state_root() / "outbox.lock"
+
+
+def flush_lock_file():
+    return state_root() / "flush.lock"
 
 
 def hooks_file():
@@ -98,24 +111,81 @@ def validate_configuration(value):
     }
 
 
+def fsync_directory(path):
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def ensure_private_directory(path):
+    missing = []
+    current = path
+    while not current.exists():
+        missing.append(current)
+        current = current.parent
+    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    for created in reversed(missing):
+        fsync_directory(created.parent)
+
+
 def atomic_json_write(path, value, mode=0o600):
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    ensure_private_directory(path.parent)
     os.chmod(path.parent, 0o700)
     descriptor, temporary_name = tempfile.mkstemp(prefix=path.name + ".", dir=str(path.parent))
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            os.fchmod(handle.fileno(), mode)
             json.dump(value, handle, separators=(",", ":"), sort_keys=True)
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
-        os.chmod(temporary_name, mode)
         os.replace(temporary_name, path)
+        fsync_directory(path.parent)
     except Exception:
         try:
             os.unlink(temporary_name)
         except FileNotFoundError:
             pass
         raise
+
+
+@contextmanager
+def private_file_lock(path, timeout):
+    ensure_private_directory(path.parent)
+    os.chmod(path.parent, 0o700)
+    descriptor = os.open(
+        path,
+        os.O_RDWR | os.O_CREAT | getattr(os, "O_CLOEXEC", 0),
+        0o600,
+    )
+    try:
+        os.fchmod(descriptor, 0o600)
+        deadline = time.monotonic() + max(0, timeout)
+        while True:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("timed out waiting for the private queue lock")
+                time.sleep(min(0.01, remaining))
+        yield descriptor
+    finally:
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+        finally:
+            os.close(descriptor)
+
+
+def outbox_lock(timeout=OUTBOX_LOCK_TIMEOUT):
+    return private_file_lock(outbox_lock_file(), timeout)
+
+
+def flush_lock(timeout=FLUSH_LOCK_TIMEOUT):
+    return private_file_lock(flush_lock_file(), timeout)
 
 
 def load_configuration():
@@ -158,32 +228,100 @@ def completion_event(payload, configuration):
     }
 
 
-def prune_outbox(now=None):
+def outbox_creation_key(path):
+    try:
+        with path.open(encoding="utf-8") as handle:
+            queued_at = json.load(handle).get(LOCAL_QUEUE_ORDER_KEY)
+        if isinstance(queued_at, int) and queued_at >= 0:
+            return (queued_at, path.name)
+    except (OSError, ValueError, json.JSONDecodeError, AttributeError):
+        pass
+    try:
+        return (path.stat().st_mtime_ns, path.name)
+    except FileNotFoundError:
+        return (2**63 - 1, path.name)
+
+
+def next_outbox_order_unlocked():
+    latest = max(
+        (outbox_creation_key(path)[0] for path in outbox_directory().glob("*.json")),
+        default=-1,
+    )
+    return max(time.time_ns(), latest + 1)
+
+
+def unlink_unlocked_outbox_path(path):
+    try:
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0))
+    except FileNotFoundError:
+        return False
+    try:
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return False
+        try:
+            path.unlink()
+            return True
+        except FileNotFoundError:
+            return False
+    finally:
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+        finally:
+            os.close(descriptor)
+
+
+def prune_outbox_unlocked(now=None, protected=None):
     directory = outbox_directory()
     if not directory.exists():
         return
     now = now or datetime.datetime.now(datetime.timezone.utc).timestamp()
-    paths = sorted(directory.glob("*.json"), key=lambda path: path.stat().st_mtime)
+    paths = sorted(directory.glob("*.json"), key=outbox_creation_key)
     cutoff = now - OUTBOX_RETENTION_DAYS * 24 * 60 * 60
+    changed = False
     for path in paths:
+        if path == protected:
+            continue
         try:
             if path.stat().st_mtime < cutoff:
-                path.unlink()
+                changed = unlink_unlocked_outbox_path(path) or changed
         except FileNotFoundError:
             pass
-    remaining = sorted(directory.glob("*.json"), key=lambda path: path.stat().st_mtime)
-    for path in remaining[:-OUTBOX_MAX_EVENTS]:
-        try:
-            path.unlink()
-        except FileNotFoundError:
-            pass
+    remaining = sorted(directory.glob("*.json"), key=outbox_creation_key)
+    excess = max(0, len(remaining) - OUTBOX_MAX_EVENTS)
+    for path in remaining:
+        if excess == 0:
+            break
+        if path == protected:
+            continue
+        if not unlink_unlocked_outbox_path(path):
+            continue
+        changed = True
+        excess -= 1
+    if changed:
+        fsync_directory(directory)
+
+
+def prune_outbox(now=None, protected=None):
+    with outbox_lock():
+        prune_outbox_unlocked(now=now, protected=protected)
 
 
 def enqueue(event):
-    prune_outbox()
-    destination = outbox_directory() / (event["event_id"] + ".json")
-    atomic_json_write(destination, event)
-    return destination
+    with outbox_lock():
+        destination = outbox_directory() / (event["event_id"] + ".json")
+        if destination.exists():
+            return destination
+        queued = dict(event)
+        # The persisted order is monotonic relative to every existing event,
+        # even when the wall clock rolls backward or older files are future-dated.
+        queued[LOCAL_QUEUE_ORDER_KEY] = next_outbox_order_unlocked()
+        atomic_json_write(destination, queued)
+        # Include the newly durable event when enforcing the bound. The lock
+        # makes concurrent enqueue/prune cycles one atomic queue operation.
+        prune_outbox_unlocked(protected=destination)
+        return destination
 
 
 def receive_exact(connection, length):
@@ -228,6 +366,8 @@ def ping_receiver(configuration, attempts=1, timeout=2, retry_delay=0.25):
     for attempt in range(attempts):
         try:
             acknowledgement = send_envelope(configuration, "ping", timeout=timeout)
+            if not isinstance(acknowledgement, dict):
+                raise ValueError("ping acknowledgement must be a JSON object")
             if acknowledgement.get("status") != "pong":
                 raise ConnectionError("the Mac receiver rejected the pairing ping")
             return acknowledgement
@@ -243,37 +383,99 @@ def ping_receiver(configuration, attempts=1, timeout=2, retry_delay=0.25):
     ) from last_error
 
 
-def flush_outbox(timeout=2):
+def claim_outbox_path(path):
+    with outbox_lock():
+        try:
+            descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0))
+        except FileNotFoundError:
+            return None
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            os.close(descriptor)
+            return None
+        try:
+            return os.fdopen(descriptor, "r", encoding="utf-8")
+        except Exception:
+            os.close(descriptor)
+            raise
+
+
+def quarantine_claimed_path(path):
+    with outbox_lock():
+        invalid = outbox_directory() / "invalid"
+        ensure_private_directory(invalid)
+        try:
+            os.replace(path, invalid / path.name)
+        except FileNotFoundError:
+            return
+        fsync_directory(outbox_directory())
+        fsync_directory(invalid)
+
+
+def unlink_acknowledged_path(path):
+    with outbox_lock():
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            return
+        fsync_directory(outbox_directory())
+
+
+def flush_outbox_locked(timeout=2):
     configuration = load_configuration()
     prune_outbox()
     directory = outbox_directory()
     if not directory.exists():
         return 0
     delivered = 0
-    paths = sorted(directory.glob("*.json"), key=lambda path: (path.stat().st_mtime, path.name))
+    paths = sorted(directory.glob("*.json"), key=outbox_creation_key)
     for path in paths:
-        try:
-            with path.open(encoding="utf-8") as handle:
-                event = json.load(handle)
-        except (OSError, ValueError, json.JSONDecodeError):
-            invalid = directory / "invalid"
-            invalid.mkdir(parents=True, exist_ok=True, mode=0o700)
-            try:
-                os.replace(path, invalid / path.name)
-            except OSError:
-                pass
+        handle = claim_outbox_path(path)
+        if handle is None:
             continue
         try:
-            acknowledgement = send_envelope(configuration, "completion", event, timeout=timeout)
-            if acknowledgement.get("event_id") != event.get("event_id"):
-                raise ValueError("acknowledgement event_id does not match")
-            if acknowledgement.get("status") not in ("accepted", "duplicate"):
-                raise ValueError("completion was not accepted")
-            path.unlink()
-            delivered += 1
-        except (OSError, ValueError, ConnectionError):
-            break
+            try:
+                event = json.load(handle)
+                if not isinstance(event, dict):
+                    raise ValueError("queued completion must be a JSON object")
+                event.pop(LOCAL_QUEUE_ORDER_KEY, None)
+                if (
+                    type(event.get("schema_version")) is not int
+                    or event["schema_version"] != PROTOCOL_VERSION
+                ):
+                    raise ValueError("queued completion has an unsupported schema version")
+                identifier = event.get("event_id")
+                if not isinstance(identifier, str) or not TOKEN_PATTERN.fullmatch(identifier):
+                    raise ValueError("queued completion has an invalid event_id")
+            except (OSError, ValueError, json.JSONDecodeError):
+                quarantine_claimed_path(path)
+                continue
+            try:
+                acknowledgement = send_envelope(
+                    configuration, "completion", event, timeout=timeout
+                )
+                if not isinstance(acknowledgement, dict):
+                    raise ValueError("completion acknowledgement must be a JSON object")
+                if acknowledgement.get("event_id") != event.get("event_id"):
+                    raise ValueError("acknowledgement event_id does not match")
+                if acknowledgement.get("status") not in ("accepted", "duplicate"):
+                    raise ValueError("completion was not accepted")
+                unlink_acknowledged_path(path)
+                delivered += 1
+            except (OSError, ValueError, ConnectionError):
+                break
+        finally:
+            handle.close()
     return delivered
+
+
+def flush_outbox(timeout=2):
+    try:
+        with flush_lock():
+            return flush_outbox_locked(timeout=timeout)
+    except TimeoutError:
+        return 0
 
 
 def run_hook(stream=None):
@@ -283,9 +485,10 @@ def run_hook(stream=None):
             return 0
         configuration = load_configuration()
         enqueue(completion_event(payload, configuration))
-        flush_outbox(timeout=0.75)
-        if any(outbox_directory().glob("*.json")):
-            trigger_background_flush()
+        # Codex waits for Stop hooks to return. Keep network delivery outside
+        # that critical path: the durable outbox owns the event before the
+        # no-block service is asked to replay it in creation order.
+        trigger_background_flush()
     except Exception:
         pass
     return 0

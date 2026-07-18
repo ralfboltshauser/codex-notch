@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent } from "react";
+import type { MouseEvent as ReactMouseEvent } from "react";
 import { CHAPTERS, RELEASE, THEMES, type NotchTheme, type StoryScene } from "./data";
 import {
   useFinePointer,
   useHeaderCollisionLayout,
+  useMobileDownloadHandoff,
   useNarrowLayout,
   useReducedMotion,
   useStoryPosition,
@@ -15,10 +17,12 @@ import {
   LockIcon,
 } from "./icons";
 import { MagneticLink } from "./components/MagneticLink";
+import { HeroProductPreview } from "./components/HeroProductPreview";
+import { FAQSection, LatestRelease, ProductFacts, ProofRail } from "./components/LandingSections";
+import { MobileDownloadDialog } from "./components/MobileDownloadDialog";
 import { NotchDemo, type NotchMode } from "./components/NotchDemo";
 import { VisualStage } from "./components/VisualStage";
 import { createSpring2D, type Spring2DController } from "./spring";
-
 const baseModeForScene: Record<string, NotchMode> = {
   hero: "collapsed",
   delegate: "collapsed",
@@ -49,13 +53,15 @@ const TOUCH_CHAPTER_COPY: Partial<
 };
 
 function App() {
-  const { scene, progress, pageProgress } = useStoryPosition();
+  const { scene, progress, pageProgress, storyInView } = useStoryPosition();
   const reduceMotion = useReducedMotion();
   const finePointer = useFinePointer();
   const narrowLayout = useNarrowLayout();
+  const usesMobileHandoff = useMobileDownloadHandoff(narrowLayout);
   const headerCollisionLayout = useHeaderCollisionLayout();
   const pointerLightRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLElement>(null);
+  const headerNavRef = useRef<HTMLElement>(null);
   const pointerSpringRef = useRef<Spring2DController | null>(null);
   const taskTimer = useRef<number | undefined>(undefined);
   const taskReleaseFrame = useRef<number | undefined>(undefined);
@@ -69,6 +75,7 @@ function App() {
   const [instantInteraction, setInstantInteraction] = useState(false);
   const [notchFocusWithin, setNotchFocusWithin] = useState(false);
   const [keyboardTaskInteraction, setKeyboardTaskInteraction] = useState(false);
+  const [mobileDownloadOpen, setMobileDownloadOpen] = useState(false);
 
   const markInteractionInstant = useCallback(() => {
     setInstantInteraction(true);
@@ -104,7 +111,7 @@ function App() {
       setAutoOpen(true);
       return;
     }
-    if (scene === "hero" || scene === "final" || narrowLayout) {
+    if (!storyInView || scene === "hero" || scene === "final" || narrowLayout) {
       setAutoOpen(false);
       return;
     }
@@ -114,7 +121,7 @@ function App() {
       SCROLL_NOTCH_DWELL_MS,
     );
     return () => window.clearTimeout(timer);
-  }, [narrowLayout, notchFocusWithin, progress, scene]);
+  }, [narrowLayout, notchFocusWithin, progress, scene, storyInView]);
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -147,15 +154,16 @@ function App() {
   const headerObscured =
     (notchMode === "full" && headerCollisionLayout) ||
     (notchMode === "compact" && narrowLayout);
+  const headerNavObscured = notchMode === "full" && !headerObscured;
 
   useLayoutEffect(() => {
-    if (
-      headerObscured &&
-      headerRef.current?.contains(document.activeElement)
-    ) {
+    const focusCollides =
+      (headerObscured && headerRef.current?.contains(document.activeElement)) ||
+      (headerNavObscured && headerNavRef.current?.contains(document.activeElement));
+    if (focusCollides) {
       document.getElementById("web-notch-trigger")?.focus({ preventScroll: true });
     }
-  }, [headerObscured]);
+  }, [headerNavObscured, headerObscured]);
 
   const navigate = (target: StoryScene, immediate = false) => {
     if (immediate) {
@@ -197,6 +205,18 @@ function App() {
   const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
     if (!finePointer || reduceMotion) return;
     pointerSpringRef.current?.moveTo(event.clientX - 310, event.clientY - 310);
+  };
+
+  const handleDownload = (event: ReactMouseEvent<HTMLAnchorElement>) => {
+    if (
+      !usesMobileHandoff ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    ) return;
+    event.preventDefault();
+    setMobileDownloadOpen(true);
   };
 
   const themeStyle = {
@@ -260,11 +280,29 @@ function App() {
           <span className="wordmark-mark"><i /></span>
           <span>Codex Notch</span>
         </a>
+        <nav
+          className={`header-nav${headerNavObscured ? " is-obscured" : ""}`}
+          ref={headerNavRef}
+          aria-label="Primary navigation"
+          aria-hidden={headerNavObscured || undefined}
+          inert={headerNavObscured}
+        >
+          <a href="#how">How it works</a>
+          <a href="#facts">Why it works</a>
+          <a href="#faq">FAQ</a>
+          <a href={RELEASE.release} target="_blank" rel="noreferrer">What’s new</a>
+        </nav>
         <div className="header-actions">
           <a href={RELEASE.repository} target="_blank" rel="noreferrer">
             <GithubIcon />Source
           </a>
-          <a className="header-download" href={RELEASE.download}>
+          <a
+            className="header-download"
+            href={RELEASE.download}
+            onClick={handleDownload}
+            aria-label={usesMobileHandoff ? "Open Mac download options" : "Download Codex Notch"}
+            aria-haspopup={usesMobileHandoff ? "dialog" : undefined}
+          >
             Download <ArrowDownIcon />
           </a>
         </div>
@@ -296,10 +334,17 @@ function App() {
               <MagneticLink
                 className="primary-cta"
                 href={RELEASE.download}
-                aria-label={`Download Codex Notch version ${RELEASE.version} for Apple silicon`}
+                onClick={handleDownload}
+                aria-label={usesMobileHandoff
+                  ? "Open options to get Codex Notch on your Mac"
+                  : `Download Codex Notch version ${RELEASE.version} for Apple silicon`}
+                aria-haspopup={usesMobileHandoff ? "dialog" : undefined}
               >
                 <span className="cta-icon"><ArrowDownIcon /></span>
-                <span><strong>Download for Apple silicon</strong><small>v{RELEASE.version} · {RELEASE.macos}</small></span>
+                <span>
+                  <strong>{usesMobileHandoff ? "Get it on your Mac" : "Download free for Apple silicon"}</strong>
+                  <small>{usesMobileHandoff ? "Share · inspect · direct ZIP" : `v${RELEASE.version} · ${RELEASE.macos}`}</small>
+                </span>
               </MagneticLink>
               <MagneticLink
                 className="secondary-cta"
@@ -311,11 +356,13 @@ function App() {
               </MagneticLink>
             </div>
             <div className="hero-proof">
-              <span><CheckIcon /> No Codex Notch account</span>
+              <span><GithubIcon /> Free · source on GitHub</span>
+              <span><CheckIcon /> Signed and notarized</span>
               <span><LockIcon /> Local by default</span>
-              <span><CheckIcon /> Exact thread handoff</span>
             </div>
           </div>
+
+          <HeroProductPreview onExplore={() => navigate("delegate")} />
 
           {finePointer ? (
             <div className={`top-intent-cue ${notchMode === "collapsed" ? "is-visible" : ""}`} aria-hidden="true">
@@ -341,7 +388,9 @@ function App() {
           </a>
         </section>
 
-        <section className="story" aria-label="How Codex Notch works">
+        <ProofRail />
+
+        <section className="story" id="how" aria-label="How Codex Notch works">
           <div className="story-wash" aria-hidden="true" />
           <div className="story-layout">
             <div className="sticky-stage-column">
@@ -427,6 +476,10 @@ function App() {
           </div>
         </section>
 
+        <ProductFacts />
+        <LatestRelease />
+        <FAQSection />
+
         <section className="final-cta" id="download" aria-labelledby="download-title">
           <div className="final-glow" aria-hidden="true" />
           <div className="final-notch-mark" aria-hidden="true"><i /></div>
@@ -439,10 +492,20 @@ function App() {
             <MagneticLink
               className="final-download"
               href={RELEASE.download}
+              onClick={handleDownload}
               strength={0.1}
+              aria-label={usesMobileHandoff
+                ? "Open options to get Codex Notch on your Mac"
+                : `Download Codex Notch version ${RELEASE.version}`}
+              aria-haspopup={usesMobileHandoff ? "dialog" : undefined}
             >
               <span className="final-download-icon"><ArrowDownIcon /></span>
-              <span><strong>Download Codex Notch</strong><small>v{RELEASE.version} · {RELEASE.architecture} · {RELEASE.macos}</small></span>
+              <span>
+                <strong>{usesMobileHandoff ? "Get it on your Mac" : "Download Codex Notch"}</strong>
+                <small>{usesMobileHandoff
+                  ? "Share · inspect · direct ZIP"
+                  : `v${RELEASE.version} · ${RELEASE.architecture} · ${RELEASE.macos}`}</small>
+              </span>
               <i className="download-arrow">↘</i>
             </MagneticLink>
             <div className="final-requirements">
@@ -464,6 +527,7 @@ function App() {
             <a className="footer-brand" href="#hero"><span className="wordmark-mark"><i /></span>Codex Notch</a>
             <p>Built for the space your Mac already has.</p>
             <div>
+              <a href="#faq">FAQ</a>
               <a href={RELEASE.release} target="_blank" rel="noreferrer">Release notes <ArrowUpRightIcon /></a>
               <a href={RELEASE.repository} target="_blank" rel="noreferrer">Source <GithubIcon /></a>
             </div>
@@ -482,6 +546,10 @@ function App() {
       <div className="sr-only" role="status" aria-live="polite">
         {threadOpening ? "Opening the exact Codex thread. Simulated on the web." : ""}
       </div>
+      <MobileDownloadDialog
+        open={mobileDownloadOpen}
+        onClose={() => setMobileDownloadOpen(false)}
+      />
     </div>
   );
 }

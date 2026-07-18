@@ -44,6 +44,7 @@ enum CodexUsageState: Equatable {
     case loading
     case available(CodexUsageOverview)
     case availableWindows([CodexRateLimitWindow])
+    case stale(windows: [CodexRateLimitWindow], observedAt: Date, message: String)
     case unavailable(message: String)
 
     var overview: CodexUsageOverview? {
@@ -270,6 +271,9 @@ struct CodexAppServerClient {
 final class CodexUsageMonitor {
     static let refreshInterval: TimeInterval = 15 * 60
     static let maximumFallbackDuration: TimeInterval = 12
+    // The live App Server reader has a six-second request timeout but no failure
+    // callback. Give that independent path time to supersede a fast fallback error.
+    static let alternateReadGraceInterval: TimeInterval = 6.25
 
     var onChange: ((CodexUsageState) -> Void)?
     var onRefreshRequested: (() -> Void)?
@@ -283,9 +287,14 @@ final class CodexUsageMonitor {
     private let historyStore: CodexUsageHistoryStore
     private let now: () -> Date
     private let availableExecutables: () -> [URL]
+    private let failureGraceInterval: TimeInterval
     private var timer: DispatchSourceTimer?
+    private var pendingFailure: DispatchWorkItem?
+    private var pendingFailureID: UUID?
     private var isRefreshing = false
-    private var hasAvailableUsage = false
+    private var successfulReadGeneration: UInt64 = 0
+    private var lastAvailableWindows: [CodexRateLimitWindow]?
+    private var lastAvailableAt: Date?
 
     private enum RefreshResult {
         case available(CodexAccountRateLimits)
@@ -298,12 +307,14 @@ final class CodexUsageMonitor {
         now: @escaping () -> Date = Date.init,
         availableExecutables: @escaping () -> [URL] = {
             CodexExecutableLocator.availableExecutables()
-        }
+        },
+        failureGraceInterval: TimeInterval = CodexUsageMonitor.alternateReadGraceInterval
     ) {
         self.client = client
         self.historyStore = historyStore
         self.now = now
         self.availableExecutables = availableExecutables
+        self.failureGraceInterval = max(0, failureGraceInterval)
     }
 
     func start() {
@@ -338,12 +349,20 @@ final class CodexUsageMonitor {
         queue.async { [weak self] in
             self?.timer?.cancel()
             self?.timer = nil
+            self?.pendingFailure?.cancel()
+            self?.pendingFailure = nil
+            self?.pendingFailureID = nil
         }
     }
 
     private func beginRefresh() {
         guard !isRefreshing else { return }
         isRefreshing = true
+        pendingFailure?.cancel()
+        pendingFailure = nil
+        pendingFailureID = nil
+        let generationAtStart = successfulReadGeneration
+        let alternateReadDeadline = DispatchTime.now() + failureGraceInterval
         DispatchQueue.main.async { [weak self] in self?.onRefreshRequested?() }
         workerQueue.async { [weak self] in
             guard let self else { return }
@@ -353,7 +372,12 @@ final class CodexUsageMonitor {
                 self.isRefreshing = false
                 switch result {
                 case .available(let limit): self.publish(limit)
-                case .unavailable(let message): self.publishUnavailable(message)
+                case .unavailable(let message):
+                    self.publishUnavailable(
+                        message,
+                        unlessSucceededAfter: generationAtStart,
+                        notBefore: alternateReadDeadline
+                    )
                 }
             }
         }
@@ -392,12 +416,17 @@ final class CodexUsageMonitor {
     }
 
     private func publish(_ limits: CodexAccountRateLimits) {
-        hasAvailableUsage = true
+        pendingFailure?.cancel()
+        pendingFailure = nil
+        pendingFailureID = nil
+        successfulReadGeneration &+= 1
+        let observedAt = now()
+        lastAvailableWindows = limits.windows
+        lastAvailableAt = observedAt
         guard let limit = limits.weeklyLimit else {
             publish(.availableWindows(limits.windows))
             return
         }
-        let observedAt = now()
         let samples = (try? historyStore.observe(limit, at: observedAt))
             ?? historyStore.currentWindowSamples(for: limit)
         let overview = CodexUsageEstimator.overview(
@@ -409,11 +438,39 @@ final class CodexUsageMonitor {
         publish(.available(overview))
     }
 
-    private func publishUnavailable(_ message: String) {
-        guard !hasAvailableUsage else { return }
+    private func publishUnavailable(
+        _ message: String,
+        unlessSucceededAfter generationAtStart: UInt64,
+        notBefore alternateReadDeadline: DispatchTime
+    ) {
+        guard successfulReadGeneration == generationAtStart else { return }
         let concise = message.split(whereSeparator: \.isNewline).first.map(String.init)
             ?? "Codex usage could not be read"
-        publish(.unavailable(message: String(concise.prefix(180))))
+        let boundedMessage = String(concise.prefix(180))
+        let failureState: CodexUsageState
+        if let windows = lastAvailableWindows, let observedAt = lastAvailableAt {
+            failureState = .stale(
+                windows: windows,
+                observedAt: observedAt,
+                message: boundedMessage
+            )
+        } else {
+            failureState = .unavailable(message: boundedMessage)
+        }
+
+        let failureID = UUID()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self,
+                  self.pendingFailureID == failureID,
+                  self.successfulReadGeneration == generationAtStart
+            else { return }
+            self.pendingFailure = nil
+            self.pendingFailureID = nil
+            self.publish(failureState)
+        }
+        pendingFailure = work
+        pendingFailureID = failureID
+        queue.asyncAfter(deadline: alternateReadDeadline, execute: work)
     }
 
     private func publish(_ state: CodexUsageState) {

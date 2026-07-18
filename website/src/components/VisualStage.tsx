@@ -110,13 +110,13 @@ export function VisualStage({
             <div className="stage-task-card">
               <div className="stage-task-top">
                 <span className="task-orb"><i /></span>
-                <small>CODEX TASK · THIS MAC</small>
+                <small>THIS MAC · CODEX-NOTCH · 2 SUBAGENTS</small>
               </div>
               <strong>Build the Codex Notch landing page</strong>
               <div className={`large-status status-${activeStatus.toLowerCase().replace(" ", "-")}`}>
                 <i />{activeStatus}
               </div>
-              <p>Runtime state from Codex App Server</p>
+              <p>codex/vibe-site-learnings · root task from Codex App Server</p>
             </div>
             <div className="delegate-caption">You keep moving. The task keeps working.</div>
           </section>
@@ -194,11 +194,20 @@ export function VisualStage({
 
           <section className={`stage-panel usage-panel ${isActive(storyScene, "usage")}`}>
             <div className="usage-dial">
-              <div className="usage-ring"><span><strong>68%</strong><small>remaining</small></span></div>
-              <p>ACCOUNT-WIDE · SEVEN DAYS</p>
+              <div className="usage-window-card is-reached">
+                <small>PRIMARY · 5 HOURS</small>
+                <strong>reached</strong>
+                <span>resets 19:20</span>
+              </div>
+              <div className="usage-window-card">
+                <small>SECONDARY · 7 DAYS</small>
+                <strong>54% <em>remaining</em></strong>
+                <span>resets Tue 08:00</span>
+              </div>
+              <p>ACCOUNT-WIDE · LABELED BY DURATION</p>
             </div>
             <div className="usage-forecast">
-              <small>LOCAL PACE</small>
+              <small>SEVEN-DAY LOCAL PACE</small>
               <strong>Lasts through reset</strong>
               <div className="usage-chart">
                 {[38, 44, 43, 52, 58, 62, 68, 71, 76, 81, 86, 90].map((height, index) => (
@@ -208,7 +217,7 @@ export function VisualStage({
               </div>
               <div className="usage-facts">
                 <span><i /> Recent change <b>12% / 18h</b></span>
-                <span><i /> Precision <b>whole percent</b></span>
+                <span><i /> Source precision <b>whole percent</b></span>
               </div>
             </div>
           </section>
@@ -218,17 +227,17 @@ export function VisualStage({
               <span className="rejected-data rejected-one">prompt <i>×</i></span>
               <span className="rejected-data rejected-two">transcript <i>×</i></span>
               <span className="rejected-data rejected-three">Codex credentials <i>×</i></span>
-              <span className="rejected-data rejected-four">model output <i>×</i></span>
+              <span className="rejected-data rejected-four">remote model output <i>×</i></span>
               <div className="signal-packet">
                 <ShieldIcon />
-                <small>RETURN SIGNAL</small>
+                <small>REMOTE RETURN SIGNAL</small>
                 <strong>Landing page finished</strong>
                 <div className="packet-fields">
                   <span>thread ID</span><span>turn ID</span><span>source</span><span>state</span><span>timestamp</span>
                 </div>
               </div>
             </div>
-            <p className="privacy-caption">Task metadata only · authenticated by a per-host pairing token.</p>
+            <p className="privacy-caption">Remote task metadata only · local outcomes never leave the Mac.</p>
           </section>
 
           <section className={`stage-panel personal-panel ${isActive(storyScene, "personal")}`}>

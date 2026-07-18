@@ -159,7 +159,7 @@ final class SettingsTests: CodexNotchTestCase {
 
     func testBundledChangelogMatchesReleaseAndRendersInSettings() throws {
         _ = NSApplication.shared
-        XCTAssertEqual(ChangelogCatalog.releases.first?.version, "0.5.0")
+        XCTAssertEqual(ChangelogCatalog.releases.first?.version, "0.5.1")
         XCTAssertGreaterThanOrEqual(ChangelogCatalog.releases.count, 25)
         XCTAssertTrue(ChangelogCatalog.releases.allSatisfy {
             !$0.title.isEmpty && !$0.changes.isEmpty

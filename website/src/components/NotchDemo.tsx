@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import {
+  RELEASE,
   STORY_SCENES,
   THEMES,
   type NotchTheme,
@@ -80,7 +81,7 @@ export function NotchDemo({
 
   const currentStoryScene = sceneAsStory(scene);
   const compactTitle =
-    scene === "trust" ? "Return signal secured" : "Landing page finished";
+    scene === "trust" ? "Return signal secured" : "Signed release published";
   const usageVisible = mode === "full" && (scene === "usage" || usageHovered);
   const hostVisible = mode === "full" && (scene === "machines" || hostHovered);
 
@@ -190,15 +191,16 @@ export function NotchDemo({
               <div className="notch-popover-anchor">
                 <button
                   type="button"
-                  className="notch-badge notch-pressable"
+                  className="notch-badge usage-badge notch-pressable"
                   onClick={(event) => onNavigate("usage", isKeyboardActivation(event))}
                   onPointerEnter={() => {
                     if (canHover()) setUsageHovered(true);
                   }}
                   onPointerLeave={() => setUsageHovered(false)}
-                  aria-label="68 percent of weekly Codex capacity remaining"
+                  aria-label="Five hour Codex limit reached; 54 percent of the seven day limit remaining"
                 >
-                  68%
+                  <span><i>5h</i><b>reached</b></span>
+                  <span><i>7d</i><b>54%</b></span>
                 </button>
                 <div
                   className={`mini-popover usage-popover ${
@@ -206,9 +208,9 @@ export function NotchDemo({
                   }`}
                   aria-hidden={!usageVisible}
                 >
-                  <strong>68% remaining</strong>
-                  <span>At this pace: lasts through reset</span>
-                  <small>Resets Tue 08:00 · click to refresh</small>
+                  <strong>5h reached · 7d 54%</strong>
+                  <span>Seven-day pace: lasts through reset</span>
+                  <small>Account-wide · labeled by duration · click to refresh</small>
                 </div>
               </div>
               <div className="notch-popover-anchor">
@@ -284,7 +286,11 @@ export function NotchDemo({
               <span className="task-number">1</span>
               <span className="task-copy">
                 <strong>Build the Codex Notch landing page</strong>
-                <small>{scene === "machines" ? "Ubuntu server" : "This Mac"}</small>
+                <small>
+                  {scene === "machines"
+                    ? "Ubuntu server · codex-notch · 2 subagents"
+                    : "This Mac · codex-notch · codex/vibe-site · 2 subagents"}
+                </small>
               </span>
               <span className={`task-status ${statusClass[activeStatus]}`}>
                 <i />{activeStatus}
@@ -300,7 +306,7 @@ export function NotchDemo({
               <span className="task-number">2</span>
               <span className="task-copy">
                 <strong>Verify the signed release</strong>
-                <small>{scene === "machines" ? "Ubuntu home" : "This Mac"}</small>
+                <small>{scene === "machines" ? "Ubuntu home · codex-notch · main" : "This Mac · codex-notch · main"}</small>
               </span>
               <span className="task-status running"><i />Running</span>
               <kbd>K</kbd>
@@ -317,8 +323,8 @@ export function NotchDemo({
             >
               <span className="task-number completed-number">3</span>
               <span className="task-copy">
-                <strong>Design the top-edge interaction</strong>
-                <small>This Mac · Just now</small>
+                <strong>Ship Codex Notch {RELEASE.version}</strong>
+                <small>Signed, notarized, and published.</small>
               </span>
               <span className="finished-mark"><CheckIcon /></span>
               <kbd>L</kbd>
@@ -332,7 +338,7 @@ export function NotchDemo({
               <span className="task-number completed-number">4</span>
               <span className="task-copy">
                 <strong>Study motion frame by frame</strong>
-                <small>Ubuntu server · 12 min ago</small>
+                <small>Motion tuned; reduced motion preserved.</small>
               </span>
               <span className="finished-mark"><CheckIcon /></span>
               <kbd>Ö</kbd>
@@ -396,7 +402,7 @@ export function NotchDemo({
           <span className="compact-icon"><CheckIcon /></span>
           <span className="compact-copy">
             <strong>{compactTitle}</strong>
-            <small>{scene === "trust" ? "Local metadata only" : "This Mac · Just now"}</small>
+            <small>{scene === "trust" ? "Remote metadata only" : "Signed and notarized · Just now"}</small>
           </span>
           <span className="compact-hint">Open <span>↗</span></span>
         </button>

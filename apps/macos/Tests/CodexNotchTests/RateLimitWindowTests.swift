@@ -128,6 +128,64 @@ final class RateLimitWindowTests: CodexNotchTestCase {
         XCTAssertFalse(view.hasAmbiguousLayout)
     }
 
+    func testHeaderNamesPreservedWindowsAsStaleAndShowsTheirAge() throws {
+        _ = NSApplication.shared
+        let limits = try XCTUnwrap(
+            CodexRateLimitParser.accountLimits(from: dualWindowResponse())
+        )
+        let observedAt = Date(timeIntervalSince1970: 1_784_500_000)
+        let now = observedAt.addingTimeInterval(17 * 60)
+        let view = WeeklyUsageHeaderView(
+            state: .stale(
+                windows: limits.windows,
+                observedAt: observedAt,
+                message: "Codex did not return usage information in time"
+            ),
+            theme: NotchTheme.all[0],
+            refresh: {}
+        )
+        view.update(
+            .stale(
+                windows: limits.windows,
+                observedAt: observedAt,
+                message: "Codex did not return usage information in time"
+            ),
+            now: now
+        )
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 160, height: 22))
+        host.addSubview(view)
+        NSLayoutConstraint.activate([
+            view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            view.topAnchor.constraint(equalTo: host.topAnchor),
+        ])
+        host.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(view.valueTextForTesting, "stale 5h reached\nstale 7d 54%")
+        XCTAssertTrue(view.valueFitsWithoutTruncationForTesting)
+        XCTAssertTrue(view.toolTip?.contains("Stale — last updated 17m ago.") == true)
+        XCTAssertTrue(
+            view.toolTip?.contains(
+                "Latest refresh failed — Codex did not return usage information in time."
+            ) == true
+        )
+        XCTAssertTrue(view.toolTip?.contains("Last known 7d: 54% remaining.") == true)
+        XCTAssertFalse(
+            view.toolTip?.contains("You have 54% of your weekly Codex limit remaining.") == true
+        )
+        XCTAssertEqual(view.frame.height, 22, accuracy: 0.1)
+        XCTAssertFalse(view.hasAmbiguousLayout)
+
+        let weekly = try XCTUnwrap(limits.weeklyLimit)
+        view.update(.available(CodexUsageOverview(
+            limit: weekly,
+            forecast: .learning(observedFor: 0),
+            recentTrend: nil,
+            windows: limits.windows
+        )), now: now)
+        XCTAssertEqual(view.valueTextForTesting, "5h reached\n7d 54%")
+        XCTAssertFalse(view.toolTip?.contains("Stale") == true)
+    }
+
     private func dualWindowResponse() -> Data {
         Data("""
         {"id":2,"result":{"rateLimits":{

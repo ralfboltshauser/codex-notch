@@ -474,6 +474,42 @@ final class OverlayInteractionTests: CodexNotchTestCase {
         overlay.hide(immediately: true)
     }
 
+    func testStaleUsageAgeAdvancesInPlaceWhileOverlayRemainsOpen() throws {
+        _ = NSApplication.shared
+        let observedAt = Date(timeIntervalSince1970: 1_784_500_000)
+        var currentTime = observedAt.addingTimeInterval(17 * 60)
+        let overlay = OverlayController(now: { currentTime })
+        let state = CodexUsageState.stale(
+            windows: [CodexRateLimitWindow(
+                durationMinutes: CodexWeeklyLimit.weeklyWindowMinutes,
+                remainingPercent: 54,
+                resetsAt: nil
+            )],
+            observedAt: observedAt,
+            message: "Codex did not return usage information in time"
+        )
+        overlay.setUsageState(state)
+        overlay.toggle()
+
+        let initialButton = try XCTUnwrap(overlay.weeklyUsageButtonForTesting)
+        XCTAssertTrue(
+            overlay.weeklyUsageToolTipForTesting?.contains(
+                "Stale — last updated 17m ago."
+            ) == true
+        )
+
+        currentTime = observedAt.addingTimeInterval(18 * 60)
+        overlay.refreshRelativeTimesForTesting()
+
+        XCTAssertTrue(overlay.weeklyUsageButtonForTesting === initialButton)
+        XCTAssertTrue(
+            overlay.weeklyUsageToolTipForTesting?.contains(
+                "Stale — last updated 18m ago."
+            ) == true
+        )
+        overlay.hide(immediately: true)
+    }
+
     func testWeeklyUsageHeaderKeepsForecastInItsTooltip() {
         _ = NSApplication.shared
         let now = Date(timeIntervalSince1970: 1_784_500_000)

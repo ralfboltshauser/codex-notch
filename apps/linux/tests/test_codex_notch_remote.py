@@ -63,6 +63,17 @@ class LinuxHookTests(unittest.TestCase):
             "source_name": "Remote Ubuntu",
         }
 
+    def completion(self, turn_id, title):
+        event = remote.completion_event(
+            {
+                "session_id": "019f5d4f-3a8d-76c0-8c2d-19451190e028",
+                "turn_id": turn_id,
+            },
+            self.configuration,
+        )
+        event["title"] = title
+        return event
+
     def tearDown(self):
         self.server.shutdown()
         self.server.server_close()
@@ -118,7 +129,7 @@ class LinuxHookTests(unittest.TestCase):
             commands,
         )
 
-    def test_hook_writes_before_delivery_and_removes_after_ack(self):
+    def test_hook_enqueues_before_scheduling_background_delivery(self):
         session_id = "019f5d4f-3a8d-76c0-8c2d-19451190e028"
         remote.atomic_json_write(remote.config_file(), self.configuration)
         remote.codex_home().mkdir(parents=True)
@@ -134,16 +145,47 @@ class LinuxHookTests(unittest.TestCase):
             "transcript_path": "/private/transcript.jsonl",
         }))
 
-        self.assertEqual(remote.run_hook(payload), 0)
-        self.assertEqual(list(remote.outbox_directory().glob("*.json")), [])
-        self.assertEqual(len(ProtocolHandler.received), 1)
-        event = ProtocolHandler.received[0]["event"]
+        queued_when_scheduled = []
+
+        def record_scheduled_delivery():
+            queued_when_scheduled.extend(remote.outbox_directory().glob("*.json"))
+
+        with mock.patch.object(
+            remote,
+            "trigger_background_flush",
+            side_effect=record_scheduled_delivery,
+        ) as trigger, mock.patch.object(remote, "flush_outbox") as flush, mock.patch.object(
+            remote,
+            "send_envelope",
+        ) as send:
+            self.assertEqual(remote.run_hook(payload), 0)
+
+        trigger.assert_called_once_with()
+        flush.assert_not_called()
+        send.assert_not_called()
+        self.assertEqual(len(queued_when_scheduled), 1)
+        queued = list(remote.outbox_directory().glob("*.json"))
+        self.assertEqual(queued, queued_when_scheduled)
+        event = json.loads(queued[0].read_text())
+        self.assertIsInstance(event.pop(remote.LOCAL_QUEUE_ORDER_KEY), int)
         self.assertEqual(event["title"], "Build the overlay")
         self.assertEqual(event["source_label"], "Remote Ubuntu")
         self.assertNotIn("outcome", event)
         self.assertNotIn("private", json.dumps(event).lower())
 
-    def test_failed_delivery_remains_in_outbox(self):
+        self.assertEqual(remote.flush_outbox(), 1)
+        self.assertEqual(list(remote.outbox_directory().glob("*.json")), [])
+        self.assertEqual(len(ProtocolHandler.received), 1)
+        self.assertEqual(ProtocolHandler.received[0]["event"], event)
+
+    def test_atomic_json_write_fsyncs_the_file_and_containing_directory(self):
+        destination = remote.outbox_directory() / ("d" * 64 + ".json")
+        with mock.patch.object(remote.os, "fsync", wraps=os.fsync) as fsync:
+            remote.atomic_json_write(destination, {"event_id": "d" * 64})
+        self.assertGreaterEqual(fsync.call_count, 2)
+        self.assertEqual(json.loads(destination.read_text())["event_id"], "d" * 64)
+
+    def test_hook_does_not_attempt_delivery_when_receiver_is_offline(self):
         remote.atomic_json_write(remote.config_file(), {
             **self.configuration,
             "endpoint_port": 65534,
@@ -153,10 +195,37 @@ class LinuxHookTests(unittest.TestCase):
             "turn_id": "turn-offline",
             "hook_event_name": "Stop",
         }))
-        with mock.patch.object(remote, "trigger_background_flush"):
+        with mock.patch.object(remote, "trigger_background_flush") as trigger, mock.patch.object(
+            remote,
+            "flush_outbox",
+            side_effect=AssertionError("Stop hook must not flush the outbox"),
+        ) as flush, mock.patch.object(
+            remote,
+            "send_envelope",
+            side_effect=AssertionError("Stop hook must not perform network delivery"),
+        ) as send:
             self.assertEqual(remote.run_hook(payload), 0)
-            remote.trigger_background_flush.assert_called_once()
+        trigger.assert_called_once_with()
+        flush.assert_not_called()
+        send.assert_not_called()
         self.assertEqual(len(list(remote.outbox_directory().glob("*.json"))), 1)
+
+    def test_hook_keeps_the_event_when_background_trigger_fails(self):
+        remote.atomic_json_write(remote.config_file(), self.configuration)
+        payload = io.StringIO(json.dumps({
+            "session_id": "019f5d4f-3a8d-76c0-8c2d-19451190e028",
+            "turn_id": "turn-trigger-failure",
+            "hook_event_name": "Stop",
+        }))
+        with mock.patch.object(
+            remote.subprocess,
+            "run",
+            side_effect=remote.subprocess.TimeoutExpired("systemctl", 0.5),
+        ) as run:
+            self.assertEqual(remote.run_hook(payload), 0)
+        self.assertEqual(len(list(remote.outbox_directory().glob("*.json"))), 1)
+        self.assertIn("--no-block", run.call_args.args[0])
+        self.assertEqual(run.call_args.kwargs["timeout"], 0.5)
 
     def test_outbox_prunes_expired_and_oldest_events(self):
         directory = remote.outbox_directory()
@@ -180,11 +249,128 @@ class LinuxHookTests(unittest.TestCase):
             sorted([paths[2].name, paths[3].name]),
         )
 
+    def test_enqueue_at_capacity_retains_newest_and_removes_oldest(self):
+        directory = remote.outbox_directory()
+        directory.mkdir(parents=True)
+        timestamp = time.time() - remote.OUTBOX_MAX_EVENTS - 1
+        existing = []
+        for index in range(remote.OUTBOX_MAX_EVENTS):
+            path = directory / ("%064x.json" % index)
+            path.write_text("{}")
+            os.utime(path, (timestamp + index, timestamp + index))
+            existing.append(path)
+
+        newest = self.completion("turn-at-capacity", "newest")
+        newest_path = remote.enqueue(newest)
+        queued = list(directory.glob("*.json"))
+
+        self.assertEqual(len(queued), remote.OUTBOX_MAX_EVENTS)
+        self.assertTrue(newest_path.exists())
+        self.assertFalse(existing[0].exists())
+
+    def test_enqueue_at_capacity_protects_newest_when_clock_regresses(self):
+        directory = remote.outbox_directory()
+        directory.mkdir(parents=True)
+        future = time.time() + 60 * 60
+        existing = []
+        for index in range(remote.OUTBOX_MAX_EVENTS):
+            path = directory / ("%064x.json" % index)
+            path.write_text("{}")
+            os.utime(path, (future + index, future + index))
+            existing.append(path)
+
+        newest = self.completion("turn-after-clock-regression", "logical newest")
+        with mock.patch.object(remote.time, "time_ns", return_value=1):
+            newest_path = remote.enqueue(newest)
+        queued = list(directory.glob("*.json"))
+
+        self.assertEqual(len(queued), remote.OUTBOX_MAX_EVENTS)
+        self.assertTrue(newest_path.exists())
+        self.assertFalse(existing[0].exists())
+
+    def test_concurrent_enqueues_keep_both_new_events_and_exact_capacity(self):
+        directory = remote.outbox_directory()
+        directory.mkdir(parents=True)
+        future = time.time() + 60 * 60
+        existing = []
+        for index in range(remote.OUTBOX_MAX_EVENTS):
+            path = directory / ("%064x.json" % index)
+            path.write_text("{}")
+            os.utime(path, (future + index, future + index))
+            existing.append(path)
+        events = [
+            self.completion("turn-concurrent-one", "concurrent one"),
+            self.completion("turn-concurrent-two", "concurrent two"),
+        ]
+        barrier = threading.Barrier(3)
+        results = []
+        errors = []
+
+        def writer(event):
+            try:
+                barrier.wait()
+                results.append(remote.enqueue(event))
+            except Exception as error:
+                errors.append(error)
+
+        threads = [threading.Thread(target=writer, args=(event,)) for event in events]
+        for thread in threads:
+            thread.start()
+        with mock.patch.object(remote.time, "time_ns", return_value=1):
+            barrier.wait()
+            for thread in threads:
+                thread.join(timeout=5)
+
+        self.assertEqual(errors, [])
+        self.assertTrue(all(not thread.is_alive() for thread in threads))
+        self.assertEqual(len(list(directory.glob("*.json"))), remote.OUTBOX_MAX_EVENTS)
+        self.assertEqual(len(results), 2)
+        self.assertTrue(all(path.exists() for path in results))
+        self.assertEqual(sum(not path.exists() for path in existing), 2)
+        orders = [json.loads(path.read_text())[remote.LOCAL_QUEUE_ORDER_KEY] for path in results]
+        self.assertEqual(len(set(orders)), 2)
+        self.assertEqual(remote.outbox_lock_file().stat().st_mode & 0o777, 0o600)
+        self.assertEqual(remote.state_root().stat().st_mode & 0o777, 0o700)
+
+    def test_outbox_lock_acquisition_is_bounded(self):
+        started = time.monotonic()
+        with remote.outbox_lock():
+            with self.assertRaises(TimeoutError):
+                with remote.outbox_lock(timeout=0.02):
+                    self.fail("contended lock unexpectedly acquired")
+        self.assertLess(time.monotonic() - started, 0.5)
+
+    def test_inflight_failure_survives_capacity_prune_without_blocking_enqueue(self):
+        remote.atomic_json_write(remote.config_file(), self.configuration)
+        first = self.completion("turn-inflight-first", "first")
+        second = self.completion("turn-inflight-second", "second")
+        newest = self.completion("turn-inflight-newest", "newest")
+        with mock.patch.object(remote, "OUTBOX_MAX_EVENTS", 2):
+            first_path = remote.enqueue(first)
+            second_path = remote.enqueue(second)
+            newest_paths = []
+
+            def fail_after_concurrent_enqueue(*_args, **_kwargs):
+                newest_paths.append(remote.enqueue(newest))
+                raise ConnectionError("receiver offline")
+
+            with mock.patch.object(
+                remote, "send_envelope", side_effect=fail_after_concurrent_enqueue
+            ):
+                self.assertEqual(remote.flush_outbox(), 0)
+
+        queued = list(remote.outbox_directory().glob("*.json"))
+        self.assertEqual(len(queued), 2)
+        self.assertTrue(first_path.exists())
+        self.assertFalse(second_path.exists())
+        self.assertEqual(len(newest_paths), 1)
+        self.assertTrue(newest_paths[0].exists())
+
     def test_flush_replays_creation_order_and_skips_corrupt_files(self):
         remote.atomic_json_write(remote.config_file(), self.configuration)
         directory = remote.outbox_directory()
-        first = {"event_id": "f" * 64, "title": "first"}
-        second = {"event_id": "0" * 64, "title": "second"}
+        first = self.completion("turn-first", "first")
+        second = self.completion("turn-second", "second")
         first_path = directory / (first["event_id"] + ".json")
         second_path = directory / (second["event_id"] + ".json")
         remote.atomic_json_write(first_path, first)
@@ -200,6 +386,68 @@ class LinuxHookTests(unittest.TestCase):
         )
         self.assertEqual(len(list((directory / "invalid").glob("*.json"))), 1)
 
+    def test_flush_quarantines_non_object_events_without_blocking_later_work(self):
+        remote.atomic_json_write(remote.config_file(), self.configuration)
+        directory = remote.outbox_directory()
+        invalid_paths = []
+        for index, value in enumerate(([], None, "not an event")):
+            path = directory / ("%064x.json" % (index + 1))
+            remote.atomic_json_write(path, value)
+            timestamp = time.time() - 60 + index
+            os.utime(path, (timestamp, timestamp))
+            invalid_paths.append(path)
+        valid = self.completion("turn-after-invalid", "after invalid")
+        remote.enqueue(valid)
+
+        self.assertEqual(remote.flush_outbox(), 1)
+        self.assertEqual(
+            [envelope["event"]["title"] for envelope in ProtocolHandler.received],
+            ["after invalid"],
+        )
+        self.assertEqual(
+            {path.name for path in (directory / "invalid").glob("*.json")},
+            {path.name for path in invalid_paths},
+        )
+
+    def test_flush_uses_persisted_queue_order_when_file_timestamps_match(self):
+        remote.atomic_json_write(remote.config_file(), self.configuration)
+        first = self.completion("turn-first", "first")
+        second = self.completion("turn-second", "second")
+        with mock.patch.object(remote.time, "time_ns", side_effect=[100, 200]):
+            first_path = remote.enqueue(first)
+            second_path = remote.enqueue(second)
+        same_timestamp = time.time() - 60
+        os.utime(first_path, (same_timestamp, same_timestamp))
+        os.utime(second_path, (same_timestamp, same_timestamp))
+
+        self.assertEqual(remote.flush_outbox(), 2)
+        self.assertEqual(
+            [envelope["event"]["title"] for envelope in ProtocolHandler.received],
+            ["first", "second"],
+        )
+
+    def test_flush_retains_event_until_a_matching_acceptance(self):
+        remote.atomic_json_write(remote.config_file(), self.configuration)
+        event = self.completion("turn-retained", "retain me")
+        responses = [
+            {"status": "rejected", "event_id": event["event_id"]},
+            {"status": "accepted", "event_id": "f" * 64},
+            ConnectionError("acknowledgement lost"),
+            [],
+            None,
+            "not an acknowledgement",
+        ]
+        for index, response in enumerate(responses):
+            with self.subTest(response=response):
+                path = remote.enqueue(event)
+                kwargs = ({"side_effect": response} if isinstance(response, Exception)
+                          else {"return_value": response})
+                with mock.patch.object(remote, "send_envelope", **kwargs):
+                    self.assertEqual(remote.flush_outbox(), 0)
+                self.assertTrue(path.exists())
+                if index + 1 < len(responses):
+                    path.unlink()
+
     def test_ping_uses_authenticated_protocol(self):
         acknowledgement = remote.send_envelope(self.configuration, "ping")
         self.assertEqual(acknowledgement["status"], "pong")
@@ -214,6 +462,18 @@ class LinuxHookTests(unittest.TestCase):
         self.assertEqual(acknowledgement["status"], "pong")
         self.assertEqual(send.call_count, 2)
         sleep.assert_called_once_with(0.25)
+
+    def test_ping_rejects_non_object_acknowledgements_without_a_traceback(self):
+        remote.atomic_json_write(remote.config_file(), self.configuration)
+        for acknowledgement in ([], None, "not an acknowledgement"):
+            with self.subTest(acknowledgement=acknowledgement):
+                stderr = io.StringIO()
+                with mock.patch.object(
+                    remote, "send_envelope", return_value=acknowledgement
+                ), mock.patch("sys.stderr", stderr):
+                    self.assertEqual(remote.main(["--ping"]), 1)
+                self.assertIn("Could not reach Codex Notch", stderr.getvalue())
+                self.assertNotIn("Traceback", stderr.getvalue())
 
     def test_ping_failure_is_concise_and_does_not_leak_a_traceback(self):
         remote.atomic_json_write(remote.config_file(), self.configuration)

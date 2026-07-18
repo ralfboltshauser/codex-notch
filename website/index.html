@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Codex Notch: Stop babysitting Codex</title>
+    <title>Codex Notch: Know when Codex needs you</title>
 
     <meta name="theme-color" content="#050706" />
     <meta name="color-scheme" content="light dark" />
@@ -40,7 +40,7 @@
     <meta property="og:image:alt" content="Codex Notch open at the top of the screen with abstract task rows and mint status signals." />
 
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Codex Notch: Stop babysitting Codex" />
+    <meta name="twitter:title" content="Codex Notch: Know when Codex needs you" />
     <meta
       name="twitter:description"
       content="A native macOS HUD for Codex tasks across your Mac and Ubuntu machines."
@@ -56,12 +56,12 @@
         "description": "A native macOS HUD for active and completed Codex tasks across your Mac and Ubuntu machines.",
         "url": "https://codex-notch.openexp.dev/",
         "image": "https://codex-notch.openexp.dev/og-card-v2.png",
-        "downloadUrl": "https://github.com/ralfboltshauser/codex-notch/releases/download/v0.5.0/CodexNotch-0.5.0.zip",
+        "downloadUrl": "{{CODEX_NOTCH_DOWNLOAD}}",
         "sameAs": "https://github.com/ralfboltshauser/codex-notch",
         "applicationCategory": "DeveloperApplication",
         "applicationSubCategory": "Developer Tools",
         "operatingSystem": "macOS 13 or later",
-        "softwareVersion": "0.5.0",
+        "softwareVersion": "{{CODEX_NOTCH_VERSION}}",
         "softwareRequirements": "Apple silicon Mac, macOS 13 or later, and Codex CLI",
         "isAccessibleForFree": true,
         "offers": {
@@ -74,6 +74,15 @@
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      <main style="max-width: 42rem; margin: 0 auto; padding: 12vh 1.5rem; font: 16px/1.55 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #0a0d0b;">
+        <p style="font-size: .75rem; letter-spacing: .12em; text-transform: uppercase;">Codex Notch · macOS 13+ · Apple silicon</p>
+        <h1 style="font-size: clamp(2.5rem, 8vw, 4.5rem); line-height: .95; letter-spacing: -.055em; margin: 1rem 0;">Leave the Codex window.<br />Keep the signal.</h1>
+        <p>Codex Notch shows what is running, signals when Codex needs you, and returns you to the exact task.</p>
+        <p><a href="{{CODEX_NOTCH_DOWNLOAD}}">Download Codex Notch v{{CODEX_NOTCH_VERSION}}</a></p>
+        <p><a href="{{CODEX_NOTCH_RELEASE}}">Read the release notes</a> · <a href="https://github.com/ralfboltshauser/codex-notch">View the source on GitHub</a></p>
+      </main>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

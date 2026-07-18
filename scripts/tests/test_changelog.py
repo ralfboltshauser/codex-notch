@@ -18,8 +18,8 @@ class ChangelogTests(unittest.TestCase):
     def test_bundled_changelog_matches_app_version_and_renders_release_notes(self):
         releases = CHANGELOG.validate_document(self.document, self.info)
 
-        self.assertEqual(releases[0]["version"], "0.5.0")
-        notes = CHANGELOG.markdown_for(releases, "0.5.0")
+        self.assertEqual(releases[0]["version"], "0.5.1")
+        notes = CHANGELOG.markdown_for(releases, "0.5.1")
         self.assertIn(releases[0]["title"], notes)
         self.assertIn(f"- {releases[0]['changes'][0]}", notes)
 
