@@ -350,7 +350,11 @@ final class AppServerObserverTests: CodexNotchTestCase {
         XCTAssertEqual(times.count, 2)
         if times.count == 2 {
             let elapsed = Double(times[1] - times[0]) / 1_000_000_000
-            XCTAssertGreaterThanOrEqual(elapsed, 0.22)
+            // The retry cannot begin until the 60 ms cycle deadline and 80 ms
+            // failure backoff have elapsed. Leave 20 ms for timer scheduling
+            // variance on shared CI runners; the focused flood test below
+            // separately asserts the full configured backoff.
+            XCTAssertGreaterThanOrEqual(elapsed, 0.12)
         }
     }
 

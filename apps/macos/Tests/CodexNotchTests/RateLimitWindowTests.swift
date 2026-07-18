@@ -168,7 +168,9 @@ final class RateLimitWindowTests: CodexNotchTestCase {
                 "Latest refresh failed — Codex did not return usage information in time."
             ) == true
         )
-        XCTAssertTrue(view.toolTip?.contains("Last known 7d: 54% remaining.") == true)
+        XCTAssertTrue(
+            view.toolTip?.contains("Last known weekly Codex limit: 54% remaining.") == true
+        )
         XCTAssertFalse(
             view.toolTip?.contains("You have 54% of your weekly Codex limit remaining.") == true
         )
