@@ -196,6 +196,8 @@ final class AppServerObserverTests: CodexNotchTestCase {
         client.onLoadedListRequest = { count in
             if count == 1 { firstLoadedRequest.fulfill() }
         }
+        let timedOut = expectation(description: "Loaded-list cycle timed out")
+        observer.onSnapshotCycleFailureForTesting = { timedOut.fulfill() }
         let received = expectation(description: "Snapshot after timed-out loaded-list retry")
         var snapshot: ActiveTaskSnapshot?
         observer.onSnapshot = { _, _, value in
@@ -205,10 +207,11 @@ final class AppServerObserverTests: CodexNotchTestCase {
 
         observer.start()
         wait(for: [firstLoadedRequest], timeout: 1)
+        wait(for: [timedOut], timeout: 1)
         let timeoutAndBackoffElapsed = expectation(
-            description: "Timeout and failure backoff elapsed"
+            description: "Failure backoff elapsed"
         )
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.12) {
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.04) {
             timeoutAndBackoffElapsed.fulfill()
         }
         wait(for: [timeoutAndBackoffElapsed], timeout: 1)

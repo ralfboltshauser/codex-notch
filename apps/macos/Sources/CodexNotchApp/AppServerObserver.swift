@@ -70,6 +70,7 @@ final class AppServerObserver {
 
     var onSnapshot: ((String, String, ActiveTaskSnapshot) -> Void)?
     var onRateLimits: ((Data) -> Void)?
+    var onSnapshotCycleFailureForTesting: (() -> Void)?
 
     init(
         sourceID: String = "local",
@@ -522,6 +523,7 @@ final class AppServerObserver {
         // create continuous reconciliation load.
         snapshotRetryNotBefore = .now() + snapshotFailureBackoff
         finishSnapshotCycle(honorRefresh: false)
+        onSnapshotCycleFailureForTesting?()
     }
 
     private func publishAndFinish(_ rows: [[String: Any]]) {
