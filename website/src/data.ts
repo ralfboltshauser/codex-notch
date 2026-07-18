@@ -1,12 +1,19 @@
 export const RELEASE = {
-  version: "0.5.0",
+  version: __CODEX_NOTCH_VERSION__,
+  build: __CODEX_NOTCH_BUILD__,
   macos: "macOS 13+",
   architecture: "Apple silicon",
   download:
-    "https://github.com/ralfboltshauser/codex-notch/releases/download/v0.5.0/CodexNotch-0.5.0.zip",
+    `https://github.com/ralfboltshauser/codex-notch/releases/download/v${__CODEX_NOTCH_VERSION__}/CodexNotch-${__CODEX_NOTCH_VERSION__}.zip`,
   release:
-    "https://github.com/ralfboltshauser/codex-notch/releases/tag/v0.5.0",
+    `https://github.com/ralfboltshauser/codex-notch/releases/tag/v${__CODEX_NOTCH_VERSION__}`,
   repository: "https://github.com/ralfboltshauser/codex-notch",
+} as const;
+
+export const LATEST_RELEASE = {
+  title: __CODEX_NOTCH_RELEASE_TITLE__,
+  date: __CODEX_NOTCH_RELEASE_DATE__,
+  changes: __CODEX_NOTCH_RELEASE_CHANGES__,
 } as const;
 
 export const STORY_SCENES = [
@@ -48,7 +55,7 @@ export const CHAPTERS: Chapter[] = [
     eyebrow: "The useful interruption",
     title: "It tells you enough—or waits quietly.",
     body:
-      "Notify opens one compact outcome without taking focus. Glance leaves a numbered signal. Quiet simply collects.",
+      "Notify opens completions and sounds. Glance badges completions, while a task that starts needing you opens in either mode. Quiet only collects.",
     note: "One attention policy for opening, sound, and unread state.",
   },
   {
@@ -67,7 +74,7 @@ export const CHAPTERS: Chapter[] = [
     title: "One calm view, wherever the work runs.",
     body:
       "Keep the Mac interface local. Let Ubuntu machines publish completions and live state over the private Tailscale network you already control.",
-    note: "No Codex Notch account. No hosted relay. No public port.",
+    note: "No Codex Notch account or cloud service. No public listener.",
   },
   {
     id: "usage",

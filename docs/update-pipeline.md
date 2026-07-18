@@ -71,6 +71,41 @@ It imports the certificate into an ephemeral keychain, signs inner Sparkle
 helpers before the framework and app, notarizes the archive, generates the
 signed appcast, and publishes a GitHub Release.
 
+## Publish the product site
+
+The signed-release workflow does not deploy `https://codex-notch.openexp.dev/`.
+Deploy the site only after the matching GitHub Release and versioned archive are
+available, so its primary CTA never points at an unpublished asset.
+
+The Vercel project link in `website/.vercel/` is machine-local and ignored by
+Git. Link it once when needed:
+
+```sh
+cd website
+vercel link --project codex-notch
+```
+
+For each release, pull the production project settings, create the local Vercel
+build output from the same checked-out release commit, and promote that exact
+prebuilt output:
+
+```sh
+cd website
+vercel pull --yes --environment production
+vercel build --prod --yes
+vercel deploy --prebuilt --prod --yes
+```
+
+`website/vercel.json` fixes the install command, Vite build, `dist` output, and
+security headers. After promotion, verify the public alias rather than trusting
+the deployment command alone:
+
+```sh
+curl -fsS https://codex-notch.openexp.dev/ | grep '"softwareVersion": "VERSION"'
+curl -fsSI https://codex-notch.openexp.dev/ | grep -i '^x-vercel-id:'
+curl -fsSIL "https://github.com/ralfboltshauser/codex-notch/releases/download/vVERSION/CodexNotch-VERSION.zip"
+```
+
 ## First release
 
 Version `0.3.0` is the first updater-capable build. Its feed returns `404` until

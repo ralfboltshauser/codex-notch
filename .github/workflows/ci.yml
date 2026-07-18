@@ -12,6 +12,23 @@ jobs:
       - name: Check Linux app and repository tooling
         run: make check-linux
 
+  website:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - name: Type-check and build product website
+        working-directory: website
+        run: |
+          npm ci
+          npm run typecheck
+          npm run build
+
   macos:
     runs-on: macos-14
     steps:

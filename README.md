@@ -57,12 +57,13 @@ turning the menu bar into another dashboard.
 - **Real runtime state.** Active tasks come from Codex App Server, not process
   names, transcript scraping, or stale terminal text.
 - **One explicit attention policy.** Notify opens completions and plays the
-  chosen sound, Glance keeps a numbered badge, and Quiet only collects.
+  chosen sound; Glance badges completions; tasks that newly need you open in
+  either mode. Quiet only collects.
 - **Useful completion context.** The local Stop hook can retain one bounded,
   deterministic line from the final response; no transcript scraping or extra
   model call is involved.
 - **Root-task clarity.** Project and branch identify similar work while active
-  subagents roll into their parent and elevate its needs-attention state.
+  subagents roll into their root task and elevate its needs-attention state.
 - **Exact-thread handoff.** Codex Notch validates the thread UUID and constructs
   the deep link itself. Remote payloads cannot provide a URL or command.
 - **One view across machines.** The Mac UI can combine local Codex work with
@@ -204,13 +205,13 @@ contract and [the architecture notes](docs/architecture.md) for code boundaries.
 
 | Concern | What Codex Notch does |
 | --- | --- |
-| Hosted infrastructure | None. There is no Codex Notch account, hosted relay, or public port. |
+| Codex Notch-hosted infrastructure | None. There is no Codex Notch account, cloud relay, or public listener. Tailscale may still use its own DERP transport when a direct path is unavailable. |
 | Network binding | The receiver binds only to the Mac's detected Tailscale IPv4 address on TCP port `47391`. |
 | Remote authentication | Every Ubuntu host receives a separate random token stored in a user-only `0600` file. |
 | Local completion record | Thread ID, turn ID, title, source identity, timestamp, and an optional bounded one-line preview of the final assistant message. It stays in the local app data. |
 | Remote completion payload | Thread ID, turn ID, title, source identity, and timestamp. |
 | Active snapshot | Thread, parent and root IDs; title and root title; display state and timestamp; sanitized project basename, branch, and optional agent labels. |
-| Never sent from Ubuntu | Working directories, prompts, transcripts, model output, Codex credentials, URLs, and commands. |
+| Never sent from Ubuntu | Full working directories; prompt, transcript, or model-output bodies; Codex account credentials; and remotely supplied navigation URL or command fields. Bounded titles and the sanitized context listed above are sent. |
 | Account usage | Primary and secondary windows are read locally from Codex's app-server protocol. Only an exact seven-day window enters the eight-week history and forecast. |
 | Existing hooks | Installation merges with `hooks.json` and creates a backup instead of replacing unrelated hooks. |
 

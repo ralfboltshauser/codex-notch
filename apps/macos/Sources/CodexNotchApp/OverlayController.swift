@@ -783,10 +783,10 @@ final class OverlayController {
         relativeTimeTimer?.invalidate()
         relativeTimeTimer = nil
     }
-
     private func refreshRelativeTimes() {
         let timestamp = now()
         rowsByEventID.values.forEach { $0.updateRelativeTime(now: timestamp) }
+        if case .stale = usageState { weeklyUsageBadge?.update(usageState, now: timestamp) }
     }
 
     func refreshRelativeTimesForTesting() {

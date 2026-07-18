@@ -165,7 +165,10 @@ final class CodexUsageTests: CodexNotchTestCase {
     }
 
     func testUsageMonitorReportsWhyUsageCannotLoadInsteadOfPublishingNothing() {
-        let monitor = CodexUsageMonitor(availableExecutables: { [] })
+        let monitor = CodexUsageMonitor(
+            availableExecutables: { [] },
+            failureGraceInterval: 0
+        )
         let unavailable = expectation(description: "Usage failure is visible")
         var state: CodexUsageState?
         monitor.onChange = { update in
@@ -182,7 +185,10 @@ final class CodexUsageTests: CodexNotchTestCase {
     }
 
     func testRefreshKeepsFailureVisibleInsteadOfReturningToLoadingDots() {
-        let monitor = CodexUsageMonitor(availableExecutables: { [] })
+        let monitor = CodexUsageMonitor(
+            availableExecutables: { [] },
+            failureGraceInterval: 0
+        )
         var states: [CodexUsageState] = []
         var unavailableCount = 0
         let first = expectation(description: "First usage failure")
@@ -202,6 +208,142 @@ final class CodexUsageTests: CodexNotchTestCase {
         monitor.stop()
 
         XCTAssertFalse(states.dropFirst(secondRefreshStart).contains(.loading))
+    }
+
+    func testColdStartFailureWaitsForAlternateReaderGraceBeforeUnavailable() {
+        let graceInterval: TimeInterval = 0.2
+        let monitor = CodexUsageMonitor(
+            availableExecutables: { [] },
+            failureGraceInterval: graceInterval
+        )
+        let loading = expectation(description: "Cold start remains visibly loading")
+        let graceCheckpoint = expectation(description: "Alternate reader gets its grace window")
+        let unavailable = expectation(description: "Failure appears after the grace window")
+        let startedAt = DispatchTime.now().uptimeNanoseconds
+        var states: [CodexUsageState] = []
+        var failureElapsed: TimeInterval?
+        monitor.onChange = { state in
+            states.append(state)
+            switch state {
+            case .loading:
+                loading.fulfill()
+            case .unavailable:
+                let elapsedNanoseconds = DispatchTime.now().uptimeNanoseconds - startedAt
+                failureElapsed = TimeInterval(elapsedNanoseconds) / 1_000_000_000
+                unavailable.fulfill()
+            default:
+                break
+            }
+        }
+
+        monitor.start()
+        wait(for: [loading], timeout: 1)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+            XCTAssertEqual(states, [.loading])
+            graceCheckpoint.fulfill()
+        }
+        wait(for: [graceCheckpoint], timeout: 1)
+        wait(for: [unavailable], timeout: 1)
+        monitor.stop()
+
+        XCTAssertEqual(
+            states,
+            [.loading, .unavailable(message: "Codex app or CLI was not found")]
+        )
+        XCTAssertGreaterThanOrEqual(failureElapsed ?? 0, graceInterval - 0.02)
+    }
+
+    func testFailureAfterSuccessPublishesTheLastWindowsAsExplicitlyStale() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let observedAt = Date(timeIntervalSince1970: 1_784_500_000)
+        let monitor = CodexUsageMonitor(
+            historyStore: CodexUsageHistoryStore(
+                fileURL: directory.appendingPathComponent("usage-history.json")
+            ),
+            now: { observedAt },
+            availableExecutables: { [] },
+            failureGraceInterval: 0
+        )
+        let available = expectation(description: "Usage succeeds first")
+        let stale = expectation(description: "A later failure marks the snapshot stale")
+        var staleState: CodexUsageState?
+        monitor.onChange = { state in
+            switch state {
+            case .available:
+                available.fulfill()
+            case .stale:
+                staleState = state
+                stale.fulfill()
+            default:
+                break
+            }
+        }
+
+        monitor.acceptRateLimitResponse(Data("""
+        {"id":2,"result":{"rateLimits":{
+          "limitId":"codex",
+          "primary":{"usedPercent":25,"windowDurationMins":300,"resetsAt":1784520000},
+          "secondary":{"usedPercent":46,"windowDurationMins":10080,"resetsAt":1784900000}
+        }}}
+        """.utf8))
+        wait(for: [available], timeout: 2)
+
+        monitor.refresh()
+        wait(for: [stale], timeout: 2)
+        monitor.stop()
+
+        guard case let .stale(windows, lastUpdatedAt, message) = staleState else {
+            return XCTFail("A failed refresh must not leave old limits looking live")
+        }
+        XCTAssertEqual(windows.map(\.durationLabel), ["5h", "7d"])
+        XCTAssertEqual(windows.map(\.remainingPercent), [75, 54])
+        XCTAssertEqual(lastUpdatedAt, observedAt)
+        XCTAssertEqual(message, "Codex app or CLI was not found")
+    }
+
+    func testLiveSocketSuccessSupersedesAConcurrentFallbackFailure() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let response = Data("""
+        {"id":2,"result":{"rateLimits":{
+          "limitId":"codex",
+          "primary":{"usedPercent":37,"windowDurationMins":10080}
+        }}}
+        """.utf8)
+        let monitor = CodexUsageMonitor(
+            historyStore: CodexUsageHistoryStore(
+                fileURL: directory.appendingPathComponent("usage-history.json")
+            ),
+            availableExecutables: { [] },
+            failureGraceInterval: 0.15
+        )
+        let firstAvailable = expectation(description: "Initial usage is available")
+        let refreshed = expectation(description: "The live socket wins the next refresh")
+        let stale = expectation(description: "Concurrent fallback failure stays suppressed")
+        stale.isInverted = true
+        var availableCount = 0
+        monitor.onChange = { state in
+            switch state {
+            case .available:
+                availableCount += 1
+                (availableCount == 1 ? firstAvailable : refreshed).fulfill()
+            case .stale:
+                stale.fulfill()
+            default:
+                break
+            }
+        }
+
+        monitor.acceptRateLimitResponse(response)
+        wait(for: [firstAvailable], timeout: 2)
+        monitor.onRefreshRequested = { [weak monitor] in
+            monitor?.acceptRateLimitResponse(response)
+        }
+        monitor.refresh()
+        wait(for: [refreshed], timeout: 2)
+        wait(for: [stale], timeout: 0.3)
+        monitor.stop()
     }
 
     func testUsageMonitorReadsWeeklyLimitFromRunningAppServerSocket() throws {

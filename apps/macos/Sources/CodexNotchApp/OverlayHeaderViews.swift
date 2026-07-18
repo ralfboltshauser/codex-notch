@@ -55,6 +55,11 @@ final class WeeklyUsageHeaderView: ClosureButton {
     private static let minimumWidth: CGFloat = 50
     private static let horizontalContentInset: CGFloat = 8
 
+    private struct StaleContext {
+        let observedAt: Date
+        let message: String
+    }
+
     private let valueLabel = NSTextField(labelWithString: "")
     private let theme: NotchTheme
     private var preferredValueWidth: CGFloat = 0
@@ -144,6 +149,13 @@ final class WeeklyUsageHeaderView: ClosureButton {
             render(overview.windows, weeklyOverview: overview, now: now)
         case .availableWindows(let windows):
             render(windows, weeklyOverview: nil, now: now)
+        case .stale(let windows, let observedAt, let message):
+            render(
+                windows,
+                weeklyOverview: nil,
+                now: now,
+                stale: StaleContext(observedAt: observedAt, message: message)
+            )
         }
     }
 
@@ -162,14 +174,17 @@ final class WeeklyUsageHeaderView: ClosureButton {
     private func render(
         _ windows: [CodexRateLimitWindow],
         weeklyOverview: CodexUsageOverview?,
-        now: Date
+        now: Date,
+        stale: StaleContext? = nil
     ) {
         guard !windows.isEmpty else {
             update(.unavailable(message: "Codex returned no account usage windows"), now: now)
             return
         }
 
-        if windows.contains(where: \.isReached) {
+        if stale != nil {
+            valueLabel.textColor = .systemOrange
+        } else if windows.contains(where: \.isReached) {
             valueLabel.textColor = .systemRed
         } else if windows.contains(where: { $0.remainingPercent <= 20 }) {
             valueLabel.textColor = .systemOrange
@@ -178,14 +193,29 @@ final class WeeklyUsageHeaderView: ClosureButton {
         }
         valueLabel.attributedStringValue = compactValue(
             windows,
-            labelsSingleWindow: weeklyOverview == nil
+            labelsSingleWindow: weeklyOverview == nil,
+            isStale: stale != nil
         )
         updatePreferredValueWidth()
-        toolTip = Self.toolTip(for: windows, weeklyOverview: weeklyOverview, now: now)
+        toolTip = Self.toolTip(
+            for: windows,
+            weeklyOverview: weeklyOverview,
+            now: now,
+            stale: stale
+        )
         isHidden = false
-        setAccessibilityLabel("Codex account limits")
-        setAccessibilityValue(windows.map(Self.accessibilityValue).joined(separator: "; "))
-        setAccessibilityHelp("Refresh account usage")
+        if let stale {
+            setAccessibilityLabel("Codex account limits stale")
+            setAccessibilityValue(
+                "Last updated \(Self.relativeAge(since: stale.observedAt, now: now)); "
+                    + windows.map(Self.accessibilityValue).joined(separator: "; ")
+            )
+            setAccessibilityHelp("Retry reading account usage")
+        } else {
+            setAccessibilityLabel("Codex account limits")
+            setAccessibilityValue(windows.map(Self.accessibilityValue).joined(separator: "; "))
+            setAccessibilityHelp("Refresh account usage")
+        }
     }
 
     private func updatePreferredValueWidth() {
@@ -210,7 +240,8 @@ final class WeeklyUsageHeaderView: ClosureButton {
 
     private func compactValue(
         _ windows: [CodexRateLimitWindow],
-        labelsSingleWindow: Bool
+        labelsSingleWindow: Bool,
+        isStale: Bool
     ) -> NSAttributedString {
         let multiple = windows.count > 1
         let font = NSFont.monospacedSystemFont(
@@ -223,6 +254,12 @@ final class WeeklyUsageHeaderView: ClosureButton {
             if index > 0 {
                 result.append(NSAttributedString(string: "\n", attributes: [.font: font]))
             }
+            if isStale {
+                result.append(NSAttributedString(
+                    string: "stale ",
+                    attributes: [.font: font, .foregroundColor: NSColor.systemOrange]
+                ))
+            }
             if multiple || labelsSingleWindow {
                 result.append(NSAttributedString(
                     string: "\(window.durationLabel) ",
@@ -231,7 +268,10 @@ final class WeeklyUsageHeaderView: ClosureButton {
             }
             result.append(NSAttributedString(
                 string: window.isReached ? "reached" : "\(window.remainingPercent)%",
-                attributes: [.font: font, .foregroundColor: statusColor(window)]
+                attributes: [
+                    .font: font,
+                    .foregroundColor: statusColor(window, isStale: isStale),
+                ]
             ))
         }
 
@@ -250,7 +290,8 @@ final class WeeklyUsageHeaderView: ClosureButton {
         return result
     }
 
-    private func statusColor(_ window: CodexRateLimitWindow) -> NSColor {
+    private func statusColor(_ window: CodexRateLimitWindow, isStale: Bool) -> NSColor {
+        if isStale { return .systemOrange }
         if window.isReached { return .systemRed }
         if window.remainingPercent <= 20 { return .systemOrange }
         return theme.accent
@@ -266,11 +307,24 @@ final class WeeklyUsageHeaderView: ClosureButton {
     private static func toolTip(
         for windows: [CodexRateLimitWindow],
         weeklyOverview: CodexUsageOverview?,
-        now: Date
+        now: Date,
+        stale: StaleContext?
     ) -> String {
         var lines: [String] = []
+        if let stale {
+            lines.append("Stale — last updated \(relativeAge(since: stale.observedAt, now: now)).")
+            lines.append("Latest refresh failed — \(stale.message).")
+        }
         for window in windows {
-            if window.isWeekly {
+            if stale != nil, window.isWeekly {
+                lines.append(window.isReached
+                    ? "Last known weekly Codex limit: reached."
+                    : "Last known weekly Codex limit: \(window.remainingPercent)% remaining.")
+            } else if stale != nil {
+                lines.append(window.isReached
+                    ? "Last known \(window.durationLabel) Codex limit: reached."
+                    : "Last known \(window.durationLabel): \(window.remainingPercent)% remaining.")
+            } else if window.isWeekly {
                 lines.append(window.isReached
                     ? "Weekly Codex limit reached."
                     : "You have \(window.remainingPercent)% of your weekly Codex limit remaining.")
@@ -280,24 +334,33 @@ final class WeeklyUsageHeaderView: ClosureButton {
                     : "\(window.durationLabel): \(window.remainingPercent)% remaining.")
             }
             if let resetsAt = window.resetsAt {
-                lines.append("\(window.durationLabel) resets \(shortDate(resetsAt))")
+                let prefix = stale == nil ? "" : "Last known "
+                lines.append("\(prefix)\(window.durationLabel) resets \(shortDate(resetsAt))")
             }
         }
         lines.append("Account-wide, not task context.")
-        if let weeklyOverview {
+        if stale == nil, let weeklyOverview {
             if case .depleted = weeklyOverview.forecast {
                 // The reached state is already stated beside the seven-day window.
             } else {
                 lines.append(forecastText(weeklyOverview.forecast, now: now))
             }
         }
-        if let trend = weeklyOverview?.recentTrend {
+        if stale == nil, let trend = weeklyOverview?.recentTrend {
             let hours = max(1, Int((trend.observedFor / 3_600).rounded()))
             lines.append("Recent change: \(trend.usedPercent)% used over \(hours)h")
         }
         lines.append("")
         lines.append("Click to refresh.")
         return lines.joined(separator: "\n")
+    }
+
+    private static func relativeAge(since observedAt: Date, now: Date) -> String {
+        let age = max(0, now.timeIntervalSince(observedAt))
+        if age < 60 { return "less than a minute ago" }
+        if age < 60 * 60 { return "\(max(1, Int(age / 60)))m ago" }
+        if age < 24 * 60 * 60 { return "\(max(1, Int(age / 3_600)))h ago" }
+        return "\(max(1, Int(age / 86_400)))d ago"
     }
 
     private static func spokenDuration(_ minutes: Int) -> String {

@@ -5,6 +5,7 @@ interface StoryPosition {
   scene: PageScene;
   progress: number;
   pageProgress: number;
+  storyInView: boolean;
 }
 
 export function useStoryPosition(): StoryPosition {
@@ -12,23 +13,33 @@ export function useStoryPosition(): StoryPosition {
     scene: "hero",
     progress: 0,
     pageProgress: 0,
+    storyInView: false,
   });
 
   useEffect(() => {
     let frame = 0;
     let previousScene: PageScene = "hero";
     let previousProgress = -1;
+    let previousPageProgress = -1;
+    let previousStoryInView = false;
 
     const measure = () => {
       frame = 0;
       const viewport = window.innerHeight;
       const hero = document.getElementById("hero");
+      const story = document.getElementById("how");
       const final = document.getElementById("download");
       const pageHeight = Math.max(
         1,
         document.documentElement.scrollHeight - viewport,
       );
       const pageProgress = Math.min(1, Math.max(0, window.scrollY / pageHeight));
+      const storyRect = story?.getBoundingClientRect();
+      const storyInView = Boolean(
+        storyRect &&
+          storyRect.top < viewport * 0.52 &&
+          storyRect.bottom > viewport * 0.52,
+      );
 
       let scene: PageScene = "hero";
       let progress = Math.min(1, Math.max(0, window.scrollY / viewport));
@@ -58,10 +69,17 @@ export function useStoryPosition(): StoryPosition {
         }
       }
 
-      if (scene !== previousScene || Math.abs(progress - previousProgress) > 0.008) {
+      if (
+        scene !== previousScene ||
+        Math.abs(progress - previousProgress) > 0.008 ||
+        Math.abs(pageProgress - previousPageProgress) > 0.002 ||
+        storyInView !== previousStoryInView
+      ) {
         previousScene = scene;
         previousProgress = progress;
-        setPosition({ scene, progress, pageProgress });
+        previousPageProgress = pageProgress;
+        previousStoryInView = storyInView;
+        setPosition({ scene, progress, pageProgress, storyInView });
       }
     };
 
@@ -106,6 +124,34 @@ export function useFinePointer() {
 
 export function useNarrowLayout() {
   return useMediaQuery("(max-width: 640px)");
+}
+
+interface MobileNavigatorSignature {
+  userAgent: string;
+  platform: string;
+  maxTouchPoints: number;
+  userAgentData?: { mobile?: boolean };
+}
+
+export function isMobilePlatform(
+  value: MobileNavigatorSignature,
+) {
+  const mobileUserAgent = /Android|iPhone|iPad|iPod|Mobile/i.test(value.userAgent);
+  const desktopClassIPad = value.platform === "MacIntel" && value.maxTouchPoints > 1;
+  return value.userAgentData?.mobile === true || mobileUserAgent || desktopClassIPad;
+}
+
+export function useMobileDownloadHandoff(narrowLayout: boolean) {
+  const coarsePointer = useMediaQuery("(pointer: coarse)");
+  const [mobilePlatform, setMobilePlatform] = useState(() => (
+    typeof navigator !== "undefined" && isMobilePlatform(navigator)
+  ));
+
+  useEffect(() => {
+    setMobilePlatform(isMobilePlatform(navigator));
+  }, []);
+
+  return mobilePlatform || (narrowLayout && coarsePointer);
 }
 
 export function useHeaderCollisionLayout() {

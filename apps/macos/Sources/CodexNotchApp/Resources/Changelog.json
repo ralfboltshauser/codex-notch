@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "0.5.1",
+      "date": "2026-07-18",
+      "title": "A signal you can trust",
+      "changes": [
+        "Active-task discovery now reconciles loaded Codex threads with bounded, metadata-only reads while preserving the existing fallback for older app-server versions.",
+        "Codex usage limits now keep their last known values during a transient refresh failure, visibly label them stale, and recover without presenting old data as current.",
+        "Remote Linux completions are now durably queued before delivery is scheduled, so the Stop-hook path performs no network delivery when the Mac or network is unavailable.",
+        "The rebuilt product page now shows the real Monitor → Signal → Return workflow first, answers privacy and compatibility questions, and gives mobile visitors an honest Mac handoff.",
+        "Website versions, downloads, latest-release copy, and structured metadata now derive from the app’s release sources and are type-checked and built in CI."
+      ]
+    },
+    {
       "version": "0.5.0",
       "date": "2026-07-17",
       "title": "Attention, on your terms",
