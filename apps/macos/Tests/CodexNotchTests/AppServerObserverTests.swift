@@ -185,14 +185,17 @@ final class AppServerObserverTests: CodexNotchTestCase {
             listRows: [row],
             loadedThreadIDs: [standaloneID],
             threads: [standaloneID: row],
-            loadedListDroppedResponseCount: 1,
-            retryDelay: 0.06
+            loadedListDroppedResponseCount: 1
         )
         let observer = observer(
             client: client,
             snapshotTimeout: 0.02,
             snapshotFailureBackoff: 0.02
         )
+        let firstLoadedRequest = expectation(description: "Initial loaded-list request")
+        client.onLoadedListRequest = { count in
+            if count == 1 { firstLoadedRequest.fulfill() }
+        }
         let received = expectation(description: "Snapshot after timed-out loaded-list retry")
         var snapshot: ActiveTaskSnapshot?
         observer.onSnapshot = { _, _, value in
@@ -201,6 +204,15 @@ final class AppServerObserverTests: CodexNotchTestCase {
         }
 
         observer.start()
+        wait(for: [firstLoadedRequest], timeout: 1)
+        let timeoutAndBackoffElapsed = expectation(
+            description: "Timeout and failure backoff elapsed"
+        )
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.12) {
+            timeoutAndBackoffElapsed.fulfill()
+        }
+        wait(for: [timeoutAndBackoffElapsed], timeout: 1)
+        client.emit(method: "thread/status/changed")
         wait(for: [received], timeout: 2)
         observer.stop()
 
